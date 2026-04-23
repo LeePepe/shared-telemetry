@@ -50,7 +50,11 @@ class DashboardReporter:
         return h
 
     def setup(self, base_url: str | None = None) -> None:
-        self._base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
+        raw = (base_url or DEFAULT_BASE_URL).rstrip("/")
+        # Ensure the base URL ends with /api/v1
+        if not raw.endswith("/api/v1"):
+            raw = raw + "/api/v1"
+        self._base_url = raw
         state_file = self._state_path()
 
         # Try to reuse persisted agent_id
@@ -61,7 +65,13 @@ class DashboardReporter:
                 self.api_key = data.get("api_key")
                 # Verify with a heartbeat
                 try:
-                    self.heartbeat(status="running")
+                    resp = requests.post(
+                        f"{self._base_url}/agents/{self.agent_id}/heartbeat",
+                        json={"status": "running"},
+                        headers=self._headers(),
+                        timeout=5,
+                    )
+                    resp.raise_for_status()
                     self.enabled = True
                     log.info("Reusing dashboard agent_id=%s", self.agent_id)
                     return
