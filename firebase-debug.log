@@ -1,0 +1,12 @@
+[debug] [2026-04-22T02:47:35.420Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-22T02:47:35.422Z] > authorizing via signed-in user (tianpli@microsoft.com)
+[debug] [2026-04-22T02:47:35.438Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-22T02:47:35.439Z] > authorizing via signed-in user (tianpli@microsoft.com)
+[debug] [2026-04-22T02:47:35.439Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-22T02:47:35.439Z] > authorizing via signed-in user (tianpli@microsoft.com)
+[debug] [2026-04-22T07:12:53.059Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-22T07:12:53.060Z] > authorizing via signed-in user (tianpli@microsoft.com)
+[debug] [2026-04-22T07:12:53.073Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-22T07:12:53.073Z] > authorizing via signed-in user (tianpli@microsoft.com)
+[debug] [2026-04-22T07:12:53.073Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-22T07:12:53.073Z] > authorizing via signed-in user (tianpli@microsoft.com)
