@@ -1,8 +1,9 @@
 services:
   loki:
     image: grafana/loki:3.1.0
+    restart: unless-stopped
     ports:
-      - "${LOKI_PORT:-3100}:3100"
+      - "127.0.0.1:${LOKI_PORT:-3100}:3100"
     volumes:
       - ./loki-config.yaml:/etc/loki/local-config.yaml
       - loki_data:/loki
@@ -15,8 +16,9 @@ services:
 
   grafana:
     image: grafana/grafana:11.2.0
+    restart: unless-stopped
     ports:
-      - "${GRAFANA_PORT:-3010}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3010}:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-telemetry}

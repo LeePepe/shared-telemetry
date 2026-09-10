@@ -1,9 +1,17 @@
 import Foundation
+import Synchronization
 
 /// 基于 print 的日志实现
 ///
 /// 将日志输出到控制台，用于开发调试。
 public final class PrintLogger: Logger, @unchecked Sendable {
+
+    private static let remoteSink = Mutex<LokiLogSink?>(nil)
+
+    /// 显式启用进程内所有 PrintLogger 的隐私过滤上传，默认不上传。
+    public static func configureRemoteSink(_ sink: LokiLogSink?) {
+        remoteSink.withLock { $0 = sink }
+    }
 
     public var minimumLevel: LogLevel
 
@@ -52,6 +60,11 @@ public final class PrintLogger: Logger, @unchecked Sendable {
         defer { lock.unlock() }
 
         guard level >= minimumLevel else { return }
+
+        Self.remoteSink.withLock { $0 }?.record(
+            level: level, subsystem: subsystem, message: message, context: context,
+            file: file, function: function, line: line
+        )
 
         let fileName = (file as NSString).lastPathComponent
         let prefix = subsystem.isEmpty ? "" : "[\(subsystem)] "

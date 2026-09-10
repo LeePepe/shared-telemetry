@@ -1,0 +1,29 @@
+{
+  "title": "VoxPocket Logs",
+  "uid": "voxpocket-logs",
+  "version": 1,
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "tags": ["VoxPocket", "logs"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Warnings and errors",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": { "showTime": true, "showLabels": false, "sortOrder": "Descending", "wrapLogMessage": true, "enableLogDetails": true },
+      "targets": [{ "refId": "A", "expr": "{app=\"VoxPocket\",stream=\"log\",level=~\"warning|error|critical\"} | json" }]
+    },
+    {
+      "id": 2,
+      "title": "Application logs — expand a row for subsystem, file, function and numeric context",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 18 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": { "showTime": true, "showLabels": false, "sortOrder": "Descending", "wrapLogMessage": true, "enableLogDetails": true },
+      "targets": [{ "refId": "A", "expr": "{app=\"VoxPocket\",stream=\"log\"} | json" }]
+    }
+  ]
+}
