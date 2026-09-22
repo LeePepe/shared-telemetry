@@ -4,7 +4,8 @@ import Foundation
 ///
 /// 提供与 ``Logger/performance(_:context:file:function:line:_:)-4vqr7`` 对称的遥测计时接口：
 /// 操作完成后自动附加 `duration_ms` 属性并调用 ``TelemetryService/track(name:properties:)``，
-/// 操作失败时附加 `error` 属性并在事件名末尾追加 `.failed`。
+/// 操作失败时在事件名末尾追加 `.failed`，不自动提取错误描述或类型。
+/// 调用方提供的属性不会被隐私过滤（`duration_ms` 会被自动写入）。
 ///
 /// ### 用法示例
 /// ```swift
@@ -51,13 +52,14 @@ public extension TelemetryService {
 
     /// 计算耗时并发送遥测事件（失败路径）
     ///
-    /// 事件名自动追加 `.failed`，并将 `error` 和 `duration_ms` 写入属性。
+    /// 事件名自动追加 `.failed`，仅自动写入 `duration_ms`，不读取或序列化错误。
+    /// 调用方提供的其他属性原样保留，包括显式提供的 `error` 属性；此接口不执行隐私过滤。
     ///
     /// - Parameters:
     ///   - eventName: 遥测事件名称（不含 `.failed` 后缀）
     ///   - start: 由 ``measureStart()`` 返回的起始时刻
-    ///   - error: 操作抛出的错误
-    ///   - properties: 附加属性
+    ///   - error: 操作抛出的错误；为保持调用兼容性保留，不读取其内容
+    ///   - properties: 附加属性（`duration_ms` 键将被自动写入）
     func measureEnd(
         _ eventName: String,
         start: ContinuousClock.Instant,
@@ -67,7 +69,6 @@ public extension TelemetryService {
         let ms = millisecondsSince(start)
         var props = properties
         props["duration_ms"] = String(format: "%.2f", ms)
-        props["error"] = error.localizedDescription
         track(name: "\(eventName).failed", properties: props)
     }
 
