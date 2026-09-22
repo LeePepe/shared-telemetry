@@ -1,6 +1,37 @@
 import Foundation
 import TelemetryDeck
 
+/// Instance-owned boundary; injected implementations need not construct SDK objects.
+internal protocol TelemetryDeckClient {
+    func initialize(appID: String, testMode: Bool?, defaultUser: String?)
+    func signal(_ name: String, parameters: [String: String])
+    func requestImmediateSync()
+    func generateNewSession()
+}
+
+private struct LiveTelemetryDeckClient: TelemetryDeckClient {
+    func initialize(appID: String, testMode: Bool?, defaultUser: String?) {
+        let config = TelemetryDeck.Config(appID: appID)
+        if let testMode {
+            config.testMode = testMode
+        }
+        config.defaultUser = defaultUser
+        TelemetryDeck.initialize(config: config)
+    }
+
+    func signal(_ name: String, parameters: [String: String]) {
+        TelemetryDeck.signal(name, parameters: parameters)
+    }
+
+    func requestImmediateSync() {
+        TelemetryDeck.requestImmediateSync()
+    }
+
+    func generateNewSession() {
+        TelemetryDeck.generateNewSession()
+    }
+}
+
 /// TelemetryDeck-backed 遥测服务
 ///
 /// 将 ``TelemetryService`` 协议映射到 TelemetryDeck SwiftSDK，
@@ -18,6 +49,7 @@ public final class TelemetryDeckService: TelemetryService, @unchecked Sendable {
     // MARK: - TelemetryService
 
     public var isEnabled: Bool
+    private let client: any TelemetryDeckClient
 
     // MARK: - Init
 
@@ -36,25 +68,33 @@ public final class TelemetryDeckService: TelemetryService, @unchecked Sendable {
         defaultUser: String? = nil
     ) {
         self.isEnabled = isEnabled
+        self.client = LiveTelemetryDeckClient()
+        client.initialize(appID: appID, testMode: testMode, defaultUser: defaultUser)
+    }
 
-        let config = TelemetryDeck.Config(appID: appID)
-        if let testMode {
-            config.testMode = testMode
-        }
-        config.defaultUser = defaultUser
-        TelemetryDeck.initialize(config: config)
+    /// Inject before initialization, including when disabled. No live SDK fallback.
+    internal init(
+        appID: String,
+        isEnabled: Bool = true,
+        testMode: Bool? = nil,
+        defaultUser: String? = nil,
+        client: any TelemetryDeckClient
+    ) {
+        self.isEnabled = isEnabled
+        self.client = client
+        client.initialize(appID: appID, testMode: testMode, defaultUser: defaultUser)
     }
 
     // MARK: - TelemetryService
 
     public func track(_ event: TelemetryEvent) {
         guard isEnabled else { return }
-        TelemetryDeck.signal(event.name, parameters: event.properties)
+        client.signal(event.name, parameters: event.properties)
     }
 
     public func track(name: String, properties: [String: String]) {
         guard isEnabled else { return }
-        TelemetryDeck.signal(name, parameters: properties)
+        client.signal(name, parameters: properties)
     }
 
     /// 请求立即同步缓存信号到服务器。
@@ -62,11 +102,11 @@ public final class TelemetryDeckService: TelemetryService, @unchecked Sendable {
     /// TelemetryDeck SDK 会自动在合适时机发送，通常无需手动调用。
     /// 在用户即将离开 App 前（如 `sceneDidEnterBackground`）调用有助于减少数据丢失。
     public func flush() async {
-        TelemetryDeck.requestImmediateSync()
+        client.requestImmediateSync()
     }
 
     /// 生成新的 TelemetryDeck 会话 ID，用于在逻辑会话边界处重置用户追踪。
     public func resetIdentifier() {
-        TelemetryDeck.generateNewSession()
+        client.generateNewSession()
     }
 }
