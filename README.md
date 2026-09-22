@@ -1,105 +1,34 @@
-# LokiKit
+# shared-telemetry
 
-A monorepo containing the shared local telemetry backend (Loki + Grafana) and the client SDKs that push logs to it.
+Shared telemetry SDKs and existing Loki/Grafana deployment assets. The canonical repository is [LeePepe/shared-telemetry](https://github.com/LeePepe/shared-telemetry) (repository ID `1213460359`), formerly LokiKit. The repository rename preserves the Swift `LokiKit`, Web `@leepepe/loki-web`, and Python `lokikit` package/import names; it is not an API migration or a release.
 
-## Layout
+## Find the right document
 
-```
-LokiKit/
-├── stack/          # Docker Compose stack: Loki + Grafana + dashboards
-├── sdks/
-│   ├── swift/      # LokiKit — Swift Package for iOS/macOS
-│   ├── web/        # @leepepe/loki-web — TypeScript SDK
-│   └── python/     # lokikit — Python SDK (logging.Handler)
-├── docs/           # Onboarding checklist & guides
-├── scripts/        # Audit & utility scripts
-└── .claude/        # Agent teamwork config
-```
-
-- `stack/` — deploy the backend with `docker compose -f stack/docker-compose.yml up -d`
-- `sdks/swift/` — LokiKit Swift Package (SPM), consumable via `.package(path: "sdks/swift")` or a remote URL once published
-- `sdks/web/` — _coming soon_ (added by a sibling task)
-- A Claude Skill packaging is also planned
-
-## Stack Quick Start
-
-```bash
-cp stack/.env.example stack/.env        # optional: customize ports/password
-docker compose -f stack/docker-compose.yml --env-file stack/.env up -d
-```
-
-- Grafana: http://localhost:3010 (admin / telemetry)
-- Loki push endpoint: http://localhost:3100/loki/api/v1/push
-
-### Stack configuration
-
-Copy `stack/.env.example` to `stack/.env` and adjust as needed:
-
-| Variable | Default | Description |
-|---|---|---|
-| `LOKI_PORT` | `3100` | Loki HTTP port |
-| `GRAFANA_PORT` | `3010` | Grafana HTTP port |
-| `GRAFANA_USER` | `admin` | Grafana admin username |
-| `GRAFANA_PASSWORD` | `telemetry` | Grafana admin password |
-
-### Adding a dashboard
-
-1. Export your dashboard JSON from Grafana (Dashboard → Share → Export → Save to file)
-2. Place the file in `stack/grafana/dashboards/<your-project>.json`
-3. Restart Grafana: `docker compose -f stack/docker-compose.yml restart grafana`
-
-Grafana polls `stack/grafana/dashboards/` every 30 seconds, so live edits appear automatically.
-
-## Swift SDK
-
-See `sdks/swift/README.md`. Clients set:
-
-```bash
-export LOKI_ENDPOINT=http://localhost:3100/loki/api/v1/push
-```
-
-### Environment variables expected by clients
-
-| Variable | Purpose |
+| Task | Read |
 |---|---|
-| `LOKI_ENDPOINT` | Loki push URL |
-| `LOKI_TOKEN`    | Bearer token (leave unset for local dev) |
+| Understand modules, dependencies and existing exceptions | [Architecture](docs/architecture.md) |
+| Consume or upgrade the library with AI assistance; match docs to a dependency pin | [AI-assisted usage](docs/ai-usage.md) |
+| Choose a language, entry point or compatibility baseline | [SDK index](sdks/README.md) |
+| Plan consumer wiring and its later verification | [Onboarding checklist](docs/onboarding-checklist.md) |
+| Inventory recoverable assets or propose an isolated drill | [Disaster recovery](docs/disaster-recovery.md) |
 
-## Web SDK (TypeScript)
+## Repository layout
 
-See [`sdks/web/README.md`](sdks/web/README.md). Zero-dependency TypeScript SDK for browser and Node 18+.
+| Path | Existing responsibility |
+|---|---|
+| [Package.swift](Package.swift) | Root Swift package entry; points at the source under `sdks/swift` |
+| [sdks/swift](sdks/swift/README.md) | Logging and telemetry interfaces, Loki and TelemetryDeck adapters |
+| [sdks/web](sdks/web/README.md) | TypeScript client, console logger, queue and shipper exports |
+| [sdks/python](sdks/README.md#python-baseline-caveats) | Python logging handler and push client; older README has caveats |
+| [stack](stack/) | Compose, Loki configuration, Grafana provisioning and dashboards |
+| [agents/project-analyzer](agents/project-analyzer/) | Separate query/report tooling, not a required SDK runtime dependency |
+| [scripts](scripts/) | Existing audit utilities, separate from SDK consumption |
+| [skills](skills/) | Existing integration material; not proof of a packaged AI contract |
 
-```typescript
-import { LokiTelemetry } from '@leepepe/loki-web';
+## Evidence and delivery status
 
-const t = new LokiTelemetry({
-  endpoint: 'http://localhost:3100/loki/api/v1/push',
-  labels: { app: 'MyApp', env: 'dev' },
-});
-t.info('hello', { key: 'value' });
-```
+**Existing implementation:** these documents are source-reviewed against `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`. All three SDK source trees exist. Manifest versions and repository assets do not establish published packages, working consumer combinations, live deployments or successful recovery. The [compatibility table](sdks/README.md#compatibility-and-distribution) separates declarations from test evidence.
 
-## Python SDK
+**Accepted target:** version-matched consumer contracts, product-local event semantics, and validated cross-SDK privacy, error and delivery behavior. A shared Loki push structure is present; a unified event envelope is not established. See [current versus target](docs/architecture.md#current-versus-accepted-target).
 
-See [`sdks/python/README.md`](sdks/python/README.md). Drop-in `logging.Handler` for FastAPI/Django/scripts.
-
-```python
-import logging
-from lokikit import LokiHandler
-
-handler = LokiHandler(labels={"app": "my-api", "env": "dev"})
-logger = logging.getLogger("my-api")
-logger.addHandler(handler)
-logger.info("Server started", extra={"port": 8000})
-```
-
-## Skill
-
-A Claude Skill packaging is planned to make this stack one-shot installable for agent-driven setups.
-
-## Projects Using This Stack
-
-| Project | Dashboard | Log label |
-|---|---|---|
-| VoxPocket (Swift/macOS) | `stack/grafana/dashboards/voxpocket.json` | `{app="VoxPocket"}` |
-| Financial (FastAPI/React) | `stack/grafana/dashboards/financial.json` | `{app="Financial"}` |
+**Proposed/unexecuted:** onboarding verification, migration/rollback and recovery procedures require their own scoped execution and evidence. Every code example in this documentation candidate is **illustrative/source-reviewed, not executed**. This slice is neither release acceptance nor completion of the packaged AI contract or T037. It contains no operational quick start; stack operations require separate review.
