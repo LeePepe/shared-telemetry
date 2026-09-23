@@ -23,7 +23,7 @@ class LokiClient:
     batch_size : int
         Flush after this many buffered entries (default 20).
     flush_interval : float
-        Max seconds between automatic flushes (default 5.0).
+        Delay before an automatic flush, scheduled after completion (default 5.0).
     token : str | None
         Optional Bearer token for Grafana Cloud / authenticated Loki.
     """
@@ -44,11 +44,22 @@ class LokiClient:
 
         self._buffer: list[tuple[str, str]] = []  # (nano_ts, line)
         self._lock = threading.Lock()
+        self._dropped_entries = 0
         self._timer: threading.Timer | None = None
         self._closed = False
         self._start_timer()
 
     # -- public API ----------------------------------------------------------
+
+    @property
+    def dropped_entries(self) -> int:
+        """Cumulative entries discarded without confirmed successful delivery.
+
+        A timeout or cancellation can leave remote delivery uncertain. This
+        read-only count describes local loss, not proven server-side loss.
+        """
+        with self._lock:
+            return self._dropped_entries
 
     def push(self, line: str, extra_labels: dict[str, str] | None = None) -> None:
         """Buffer a log line. Flushes automatically when batch_size is reached."""
@@ -85,13 +96,22 @@ class LokiClient:
             self._buffer.clear()
         if not entries:
             return
-        body = self._build_body(entries)
-        headers = {"Content-Type": "application/json"}
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-        async with aiohttp.ClientSession() as session:
-            async with session.post(self.endpoint, json=body, headers=headers) as resp:
-                resp.raise_for_status()
+        delivered = False
+        try:
+            body = self._build_body(entries)
+            headers = {"Content-Type": "application/json"}
+            if self.token:
+                headers["Authorization"] = f"Bearer {self.token}"
+            timeout = aiohttp.ClientTimeout(total=5.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(self.endpoint, json=body, headers=headers) as resp:
+                    resp.raise_for_status()
+            delivered = True
+        finally:
+            # Also accounts for cancellation, without changing propagation.
+            if not delivered:
+                with self._lock:
+                    self._dropped_entries += len(entries)
 
     # -- internals -----------------------------------------------------------
 
@@ -111,21 +131,29 @@ class LokiClient:
         self._buffer.clear()
         if not entries:
             return
-        body = self._build_body(entries)
-        data = json.dumps(body).encode()
-        req = urllib.request.Request(
-            self.endpoint,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        if self.token:
-            req.add_header("Authorization", f"Bearer {self.token}")
+        delivered = False
         try:
-            urllib.request.urlopen(req, timeout=5)
-        except Exception:
-            # Best-effort: don't crash the application on telemetry failure
-            pass
+            body = self._build_body(entries)
+            data = json.dumps(body).encode()
+            req = urllib.request.Request(
+                self.endpoint,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            if self.token:
+                req.add_header("Authorization", f"Bearer {self.token}")
+            try:
+                urllib.request.urlopen(req, timeout=5)
+            except Exception:
+                # Only transport exceptions remain best-effort/non-raising.
+                pass
+            else:
+                delivered = True
+        finally:
+            # The caller already holds _lock; preparation failures still raise.
+            if not delivered:
+                self._dropped_entries += len(entries)
 
     def _build_body(self, entries: list[tuple[str, str]]) -> dict[str, Any]:
         return {
