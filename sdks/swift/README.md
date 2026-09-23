@@ -1,12 +1,12 @@
 # LokiKit Swift SDK
 
-Read this contract when wiring Swift telemetry, console logging or a remote log mirror. Existing implementation facts below are source-reviewed at `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`; all examples are **illustrative/source-reviewed, not executed**. Accepted upgrade targets and proposed consumer validation are described in [architecture](../../docs/architecture.md) and [onboarding](../../docs/onboarding-checklist.md), not claimed as implemented here.
+Read this contract when wiring Swift telemetry, console logging or a remote log mirror. Implementation facts were originally source-reviewed at `eff9c1712cd648ed0717e41183ad8bd7bf39cbea` and are reconciled here with the integrated Swift changes at `45bb59282fa32e2c87849527b9253d928c6ac5ee`: an instance-owned internal TelemetryDeck client seam for tests, with public live-adapter behavior retained, and removal of automatic error extraction from `TelemetryService` performance helpers. This reconciliation is source-only, not verification of combined runtime behavior or delivery; all examples remain **illustrative/source-reviewed, not executed**. Accepted upgrade targets and proposed consumer validation are described in [architecture](../../docs/architecture.md) and [onboarding](../../docs/onboarding-checklist.md), not claimed as implemented here.
 
 ## Package and compatibility
 
 The [root manifest](../../Package.swift) and [nested manifest](Package.swift) expose the same `LokiKit` library from [Sources/LokiKit](Sources/LokiKit/). Both declare Swift tools `6.2`, iOS `26`, macOS `26` and a TelemetryDeck SwiftSDK dependency from `2.0.0`. The repository name is `shared-telemetry`; the product and `import LokiKit` remain unchanged. Use one package entry, not two copies of the same module.
 
-These are manifest requirements, not tested combinations or an assertion of release availability. No SDK build, example type-check or runtime verification was performed for this candidate. See the [cross-SDK compatibility table](../README.md#compatibility-and-distribution).
+These are manifest requirements, not tested combinations or an assertion of release availability. No SDK build, example type-check or runtime verification was performed for this documentation reconciliation. See the [cross-SDK compatibility table](../README.md#compatibility-and-distribution).
 
 ## Choose a public interface
 
@@ -19,7 +19,7 @@ These are manifest requirements, not tested combinations or an assertion of rele
 | [LokiTelemetryService](Sources/LokiKit/LokiTelemetryService.swift) | Loki event transport and failed-batch persistence; `resetIdentifier()` is a no-op |
 | [LokiLogSink](Sources/LokiKit/LokiLogSink.swift) | Separate, bounded, filtered log mirror; `record`, `start(flushInterval:)`, `flush() async` |
 | [TelemetryDeckService](Sources/LokiKit/TelemetryDeckService.swift) | Adapter to TelemetryDeck, not Loki |
-| [TelemetryService performance extensions](Sources/LokiKit/TelemetryService+Performance.swift) | Sync/async `measure`, `measureStart`, `measureEnd`; append timing and failure properties |
+| [TelemetryService performance extensions](Sources/LokiKit/TelemetryService+Performance.swift) | Sync/async `measure`, `measureStart`, `measureEnd`; record `duration_ms` timing and append `.failed` to failure event names, without automatically extracting error descriptions |
 | [TelemetryEventName](Sources/LokiKit/VoxPocketTelemetryEventNames.swift) | Existing product-specific enum; its presence is an exception to the product-local semantics target, not a relocation already completed |
 
 `TelemetryQueue` and Swift `LokiShipper` are internal implementation details, unlike the Web exports of similar names.
@@ -86,6 +86,6 @@ This path is distinct from event telemetry:
 
 ## Privacy and authentication
 
-The log sink's filtering is not universal SDK redaction. Labels, subsystem and function metadata still need review; the sink retains a file basename and line number. `PrintLogger` continues to print supplied messages and context locally, including content redacted from the remote mirror. Both performance-helper families can include `error.localizedDescription`; event telemetry forwards caller-provided properties. `isEnabled` is a switch, not a consent UI or data-erasure mechanism.
+The log sink's filtering is not universal SDK redaction. Labels, subsystem and function metadata still need review; the sink retains a file basename and line number. `PrintLogger` continues to print supplied messages and context locally, including content redacted from the remote mirror. `Logger` performance helpers still include `error.localizedDescription` in failure context. `TelemetryService` `measure`/`measureEnd` helpers do not automatically extract error descriptions or types: they write `duration_ms` and append `.failed` to failure event names. Their other caller-provided properties, including an explicitly supplied `error`, remain unchanged and are not sanitized; `duration_ms` is overwritten by the measured timing. Event telemetry also forwards caller-provided properties. `isEnabled` is a switch, not a consent UI or data-erasure mechanism.
 
 Loki adapters optionally send `Authorization: Bearer …`. This neither authenticates the receiver by itself nor proves general Grafana Cloud compatibility. The old base64 credential recipe is unsupported by this source inspection. Receiver requirements, transport security and credential provisioning need separately verified consumer configuration; no credentials belong in examples. For asset-level recovery limits read [disaster recovery](../../docs/disaster-recovery.md).
