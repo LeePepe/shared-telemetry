@@ -54,8 +54,6 @@ Add LokiKit as a local SPM dependency in `Package.swift`:
 
     dependencies: [
         .package(path: "../LokiKit/sdks/swift")
-        // or absolute:
-        // .package(path: "/Users/you/Development/LokiKit/sdks/swift")
     ],
     targets: [
         .target(name: "MyApp", dependencies: [

@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# shared-telemetry single verification entry, shared by .githooks/pre-push and CI.
+#
+#   scripts/verify                changed layers vs $VERIFY_BASE (default origin/main) + policy
+#   scripts/verify --changed      same as the default
+#   scripts/verify --all          policy + every layer gate (the union of all CI lanes)
+#   scripts/verify --policy       contract audit + workflow-lint only (CI verify lane)
+#   scripts/verify --layer L ...  one or more layers' gates (CI build/test/lint lanes)
+#
+# Layer selection and gates come from docs/architecture/tech-context.md through
+# the shared-ci resolver pinned in AGENTS.md ($SHARED_CI, default .shared-ci).
+# Layers without a gate (Stack) are reported and skipped. Tool setup:
+# scripts/ci/setup.sh (creates .venv, which is put first on PATH when present).
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+# Git hooks export GIT_DIR and friends; drop them so the .shared-ci fetch below
+# never touches this repository's object store.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX
+[ -x "$root/.venv/bin/python3" ] && PATH="$root/.venv/bin:$PATH"
+
+mode="changed"
+layers_arg=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --changed) mode="changed" ;;
+        --all) mode="all" ;;
+        --policy) mode="policy" ;;
+        --layer) mode="layer"; layers_arg+=("${2:?--layer needs a layer name}"); shift ;;
+        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+        *) echo "[verify] unknown option: $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+# ---- shared-ci resolver at the pinned SHA -----------------------------------
+default_cache="$root/.shared-ci"
+shared_ci="${SHARED_CI:-$default_cache}"
+pin="$(sed -n 's|.*LeePepe/shared-ci@\([0-9a-f]\{40\}\)/ai/agent-protocol\.md.*|\1|p' AGENTS.md | head -1)"
+[ -n "$pin" ] || { echo "[verify] AGENTS.md has no full-SHA shared-ci protocol pointer" >&2; exit 1; }
+if [ "$(git -C "$shared_ci" rev-parse HEAD 2>/dev/null || true)" != "$pin" ]; then
+    if [ "$shared_ci" != "$default_cache" ]; then
+        echo "[verify] SHARED_CI=$shared_ci is not a shared-ci checkout at $pin; refusing to modify it" >&2
+        exit 1
+    fi
+    rm -rf "$default_cache"
+    git init -q "$default_cache"
+    git -C "$default_cache" fetch -q --depth=1 "${SHARED_CI_URL:-https://github.com/LeePepe/shared-ci.git}" "$pin" \
+        || { echo "[verify] cannot fetch shared-ci $pin" >&2; exit 1; }
+    git -C "$default_cache" checkout -q --detach FETCH_HEAD
+fi
+context=(python3 "$shared_ci/scripts/context/_context.py")
+
+policy() {
+    echo "[verify] policy: contract audit + workflow-lint"
+    "${context[@]}" audit
+    python3 "$shared_ci/scripts/lint/workflows.py" --root . >/dev/null
+}
+
+run_layer() {
+    local gate_mode="local"
+    [ "${VERIFY_MODE:-}" = "ci" ] && gate_mode="ci"
+    if [ "$("${context[@]}" field "$1" gates)" = "[]" ]; then
+        echo "[verify] $1: no automated gate (see its tech-context.md); skipped"
+        return 0
+    fi
+    "${context[@]}" run "$1" --mode "$gate_mode"
+}
+
+case "$mode" in
+    policy)
+        policy; echo "[verify] ok: policy"; exit 0 ;;
+    layer)
+        for name in "${layers_arg[@]}"; do run_layer "$name"; done
+        echo "[verify] ok: ${layers_arg[*]}"; exit 0 ;;
+    all)
+        policy
+        layers="$("${context[@]}" layers --all)"
+        for name in $layers; do run_layer "$name"; done
+        echo "[verify] ok: all layers ($(echo $layers))"; exit 0 ;;
+esac
+
+# ---- changed mode (what .githooks/pre-push runs) ------------------------------
+policy
+base="$(git merge-base "${VERIFY_BASE:-origin/main}" HEAD)"
+changed="$(git diff --name-only "$base" HEAD)"
+if [ -z "$changed" ]; then echo "[verify] ok: no changes"; exit 0; fi
+layers="$(printf '%s\n' "$changed" | "${context[@]}" layers --stdin)"
+for name in $layers; do run_layer "$name"; done
+echo "[verify] ok: changed layers: $(echo ${layers:-none})"
