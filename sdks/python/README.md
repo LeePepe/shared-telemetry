@@ -130,5 +130,5 @@ existing telemetry delivery implementation.
 
 | Variable | Purpose |
 |---|---|
-| `LOKI_ENDPOINT` | Override default endpoint |
-| `LOKI_TOKEN` | Bearer token |
+| `LOKI_ENDPOINT` | Not read automatically by the SDK; callers must explicitly read any approved environment configuration and pass `endpoint=` to `LokiClient` or `LokiHandler` |
+| `LOKI_TOKEN` | Not read automatically by the SDK; callers must explicitly read any approved environment configuration and pass `token=` to `LokiClient` or `LokiHandler` |

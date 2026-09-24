@@ -1,6 +1,6 @@
 # AI-assisted consumer usage
 
-Read this page when using AI assistance to integrate, change, upgrade or investigate a consumer of shared-telemetry. The source contract described here is `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`. It describes an existing implementation and accepted delivery targets; proposed verification remains unexecuted.
+Read this page when using AI assistance to integrate, change, upgrade or investigate a consumer of shared-telemetry. The historical source contract is `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`; the current candidate also incorporates the Python delta from `852d7643bbb2c4fbed38018196a1a5c2c225e223`. The [SDK index](../sdks/README.md#python-baseline-caveats) separates that source's bounded hosted test evidence from unexecuted combined-PR and consumer verification. Accepted delivery targets are not established by a development-slice pass.
 
 “AI usage” means assistance consuming the library's public contract. It is not permission to transmit user data to an AI service. These documents are task material, not new agent instructions, runtime policy or operational authority. Product-owned semantics, data approval and operational permissions remain with their existing owners.
 
@@ -20,9 +20,9 @@ The entry provides branches rather than requiring every consumer to read every S
 
 1. Identify the actual resolved dependency from the consumer manifest/lockfile or Swift package resolution. For a local checkout dependency, record its exact revision and any local divergence, not only its directory name.
    **Completion criterion:** package identity, resolved revision/artifact and consumer platform are recorded.
-2. Locate documentation for that exact revision. This candidate covers only the baseline stated above; Web/Python `0.1.0` declarations alone cannot distinguish all local candidates or prove publication. The repository rename preserves existing imports and does not validate old URL redirects as a consumer integration strategy.
+2. Locate documentation for that exact revision. Distinguish the historical baseline from the incorporated Python source delta stated above; Web/Python `0.1.0` declarations alone cannot distinguish all local candidates or prove publication. The repository rename preserves existing imports and does not validate old URL redirects as a consumer integration strategy.
    **Completion criterion:** documentation and source version match, or the mismatch is explicitly reported before relying on examples.
-3. Discover the public surface from [SDK entry points](../sdks/README.md#entry-points), then inspect only the relevant exports/signatures. Swift's queue/shipper are internal; Web's queue/shipper are exported. Python imports come from `lokikit`; its older README needs the canonical caveats.
+3. Discover the public surface from [SDK entry points](../sdks/README.md#entry-points), then inspect only the relevant exports/signatures. Swift's queue/shipper are internal; Web's queue/shipper are exported. Python imports come from `lokikit`; read its README with the index's baseline/current-candidate distinction.
    **Completion criterion:** each proposed call maps to an actual public API at the selected version, without borrowing APIs from unpublished work.
 4. Separate declared requirements from observed support using the [compatibility table](../sdks/README.md#compatibility-and-distribution). Missing artifacts, inaccessible version-bound docs or absent test evidence are gaps, not reasons to silently use floating `main`/latest documentation.
    **Completion criterion:** unsupported assumptions are visible and later validation is scoped to the selected artifact/platform.
@@ -31,7 +31,9 @@ No registry resolver, package installation or network lookup is executed by this
 
 ## Examples and failure interpretation
 
-The [Swift examples](../sdks/swift/README.md#loki-event-telemetry) illustrate event configuration and a separate console logger. The [Web example](../sdks/web/README.md#client-usage) illustrates `track`, `log`, attempted flush and shutdown. All are **illustrative/source-reviewed, not executed**. Python's older examples remain separately owned and unvalidated; consult [baseline caveats](../sdks/README.md#python-baseline-caveats) before using them.
+The [Swift examples](../sdks/swift/README.md#loki-event-telemetry) illustrate event configuration and a separate console logger. The [Web example](../sdks/web/README.md#client-usage) illustrates `track`, `log`, attempted flush and shutdown. All are **illustrative/source-reviewed, not executed**. Python's examples remain unvalidated; consult [baseline and current candidate caveats](../sdks/README.md#python-baseline-caveats) before using them. Constructors do not automatically read `LOKI_ENDPOINT` or `LOKI_TOKEN`; callers must explicitly read any approved environment configuration and pass constructor arguments.
+
+The current Python `dropped_entries` counter reports cumulative local discards without confirmed delivery, not proven server-side loss. `aflush()` now explicitly uses `aiohttp.ClientTimeout(total=5.0)`, not a hard wall-clock completion guarantee. These are deltas from the historical baseline, not retries, requeueing or nonblocking enqueue: `apush()` still delegates to synchronous `push()`. They do not establish Financial replacement readiness. The 42-case hosted pass applies only to source `852d7643bbb2c4fbed38018196a1a5c2c225e223`, independently acquired by workflow head `27e97449fc3fcd36552626d67c62ba70cd03022d`; it does not validate the combined PR head, required CI checks, documentation examples or consumer integration.
 
 Source review does not instantiate clients: constructors can start timers, initialize TelemetryDeck, create directories or touch browser storage. A parse-only result does not establish public import resolution, type correctness, delivery, privacy or shutdown safety. Those require separate matching execution evidence.
 
@@ -57,7 +59,7 @@ This is a **proposed/unexecuted** consumer migration outline, not a tested versi
 | Contract concern | Current equivalent entry | Outstanding accepted target |
 |---|---|---|
 | Entry, compatibility, migration | This page plus the [SDK index](../sdks/README.md) | Validated immutable-version resolution and tested migration/rollback combinations |
-| Public usage and errors | SDK READMEs; Python caveats in the index pending separately owned README correction | Reconciliation with final implementation candidates and complete cross-SDK contract verification |
+| Public usage and errors | SDK READMEs; Python loss-accounting/timeout delta and unchanged limits in the index, with explicit-configuration README correction | Final-version validation and complete cross-SDK contract verification; bounded Python source evidence does not establish combined acceptance |
 | Integration | [Onboarding](onboarding-checklist.md) | Actual clean-consumer artifact installation, wiring and removal evidence |
 | Examples | Existing documentation examples, explicitly illustrative | Executable consumer fixtures and matching compile/type/behavior results |
 | Machine discovery | No versioned machine registry established in this slice | Versioned schema/registry resolving capabilities and documents to actual public APIs |
