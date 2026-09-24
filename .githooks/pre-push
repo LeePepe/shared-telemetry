@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Same entry as CI. Enable once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+exec "$(git rev-parse --show-toplevel)/scripts/verify"

@@ -9,3 +9,12 @@ xcuserdata/
 node_modules/
 dist/
 __pycache__/
+
+# shared-ci resolver cache and local toolchain (scripts/verify, scripts/ci/setup.sh)
+.shared-ci/
+.venv/
+*.egg-info/
+.pytest_cache/
+# Local SPM resolution for the root package; consumers resolve their own
+/Package.resolved
+.vite/

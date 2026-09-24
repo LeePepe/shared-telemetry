@@ -1,0 +1,39 @@
+# Caller of the shared-ci fail-closed quality gate. Every lane runs the same
+# entry as .githooks/pre-push (scripts/verify); `quality / aggregate` is the
+# single check the ruleset needs to require.
+#   verify   scripts/verify --policy     contract audit + workflow-lint via the verify entry
+#   build    SwiftSDK layer (macOS 26)   swift build + swift test on the root package
+#   test     WebSDK, PythonSDK, ProjectAnalyzer layers
+#            npm ci + typecheck + vitest run + tsup build; pytest for both Python trees
+# The Stack layer (Docker Compose + Grafana assets) has no automated gate.
+# No AI review caller: this repository has no self-hosted runner.
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    uses: LeePepe/shared-ci/.github/workflows/quality.yml@761fe6b0b3ca5e2c57d244182d495ab8041851fa
+    with:
+      runs-on: ubuntu-latest
+      setup-command: scripts/ci/setup.sh
+      verify-command: scripts/verify --policy
+      build-command: scripts/verify --layer SwiftSDK
+      build-runs-on: macos-26
+      test-command: scripts/verify --layer WebSDK --layer PythonSDK --layer ProjectAnalyzer
+      contract-audit: true
+      workflow-lint: true
