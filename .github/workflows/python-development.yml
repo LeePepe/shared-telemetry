@@ -164,7 +164,7 @@ jobs:
                   names = [n for n in archive.namelist() if n.endswith(".dist-info/METADATA")]
                   assert len(names) == 1
                   raw = archive.read(names[0])
-                  info = email.parser.BytesParser().parsebytes(raw)
+                  info = email.parser.Parser().parsestr(raw.decode("utf-8"))
               metadata.append({"name": row["name"], "filename": wheel["filename"],
                                "size": len(data), "sha256": digest, "transfer": transfer,
                                "metadata_sha256": hashlib.sha256(raw).hexdigest(),
