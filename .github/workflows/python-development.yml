@@ -1,0 +1,406 @@
+name: Python SDK development
+
+# Authoring only; publication of this push-triggered file requires separate approval.
+# Repository 1213460359: accepted LokiKit -> LeePepe/shared-telemetry rename.
+# r3 JSONL SHA256: ee96844d04d65aa4b9109e0bda2e4b68f88b4f5be120a17657122ac8db98b0cb
+# Wheel hashes are metadata claims until acquisition verifies actual bytes.
+on:
+  push:
+    branches: [upgrade/python-sdk-development-20260924]
+
+permissions: {}
+
+jobs:
+  python:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash --noprofile --norc -euo pipefail {0}
+    steps:
+      - name: Admit existing runtime and record runner tools
+        id: admission
+        env:
+          TASK_ROOT: ${{ runner.temp }}/python-development-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          mkdir "$TASK_ROOT"
+          mkdir "$TASK_ROOT/evidence" "$TASK_ROOT/wheels" "$TASK_ROOT/tmp"
+          env -i PATH=/usr/bin:/bin TASK_ROOT="$TASK_ROOT" PIP_CONFIG_FILE=/dev/null \
+            IMAGE_OS="$ImageOS" IMAGE_VERSION="$ImageVersion" \
+            RUNNER_NAME="$RUNNER_NAME" RUNNER_ARCH="$RUNNER_ARCH" \
+            /usr/bin/python3.12 -I -S -B - <<'PY'
+          import hashlib, json, os, pathlib, platform, subprocess, sys, sysconfig
+          root = pathlib.Path(os.environ["TASK_ROOT"])
+          def command(*args):
+              return subprocess.check_output(args, text=True, timeout=15).strip()
+          identity = {
+              "executable": sys.executable, "resolved_executable": str(pathlib.Path(sys.executable).resolve()),
+              "executable_sha256": hashlib.sha256(pathlib.Path(sys.executable).read_bytes()).hexdigest(),
+              "python": sys.version, "implementation": platform.python_implementation(),
+              "system": platform.system(), "machine": platform.machine(), "libc": platform.libc_ver(),
+              "soabi": sysconfig.get_config_var("SOABI"), "os_release": platform.freedesktop_os_release(),
+              "runner": {k: os.environ[k] for k in ("IMAGE_OS", "IMAGE_VERSION", "RUNNER_NAME", "RUNNER_ARCH")},
+              "git": command("/usr/bin/git", "--version"), "curl": command("/usr/bin/curl", "--version"),
+          }
+          print(json.dumps(identity), flush=True)
+          (root / "evidence/runtime.json").write_text(json.dumps(identity, indent=2) + "\n")
+          assert identity["implementation"] == "CPython" and sys.version_info[:3] == (3, 12, 3)
+          assert (identity["system"], identity["machine"], identity["libc"]) == ("Linux", "x86_64", ("glibc", "2.39"))
+          assert identity["soabi"] == "cpython-312-x86_64-linux-gnu"
+          assert identity["os_release"]["ID"] == "ubuntu" and identity["os_release"]["VERSION_ID"] == "24.04"
+          # Observe the existing ordinary installer; never bootstrap or upgrade it.
+          pip = command(sys.executable, "-I", "-B", "-m", "pip", "--isolated", "--version")
+          print(pip, flush=True)
+          (root / "evidence/pip-identity.json").write_text(json.dumps({"command": "/usr/bin/python3.12 -I -B -m pip", "identity": pip}) + "\n")
+          PY
+
+      - name: Acquire exact immutable source without credentials
+        id: source
+        env:
+          TASK_ROOT: ${{ runner.temp }}/python-development-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          env -i PATH=/usr/bin:/bin TASK_ROOT="$TASK_ROOT" \
+            GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+          /bin/bash --noprofile --norc -euo pipefail <<'SH'
+          umask 022
+          cd "$TASK_ROOT"
+          git init --template= source
+          cd source
+          timeout 120 git -c credential.helper= -c http.followRedirects=false \
+            -c protocol.allow=never -c protocol.https.allow=always \
+            fetch --depth=1 --no-tags --no-recurse-submodules \
+            https://github.com/LeePepe/shared-telemetry.git \
+            852d7643bbb2c4fbed38018196a1a5c2c225e223
+          test "$(git rev-parse FETCH_HEAD)" = 852d7643bbb2c4fbed38018196a1a5c2c225e223
+          test "$(git rev-parse 'FETCH_HEAD^{tree}')" = b4b25c68efa09cd87f17a45d5d4a21bf0fa143f5
+          git ls-tree -r FETCH_HEAD > "$TASK_ROOT/evidence/source-tree.txt"
+          /usr/bin/python3.12 -I -S -B - <<'PY'
+          import os, pathlib
+          root = pathlib.Path(os.environ["TASK_ROOT"])
+          rows = (root / "evidence/source-tree.txt").read_text().splitlines()
+          assert len(rows) == 77
+          for row in rows:
+              entry, name = row.split("\t")
+              mode, kind, blob = entry.split()
+              assert mode in ("100644", "100755") and kind == "blob"
+              assert pathlib.PurePosixPath(name).name not in (".gitattributes", ".gitmodules")
+          assert not list((root / "source/.git/hooks").glob("*"))
+          assert not (root / "source/.git/info/attributes").exists()
+          PY
+          git -c core.autocrlf=false -c core.filemode=true -c core.hooksPath=/dev/null \
+            checkout --detach FETCH_HEAD
+          /usr/bin/python3.12 -I -S -B - <<'PY'
+          import hashlib, json, os, pathlib, stat
+          root = pathlib.Path(os.environ["TASK_ROOT"])
+          inventory = []
+          for row in (root / "evidence/source-tree.txt").read_text().splitlines():
+              entry, name = row.split("\t")
+              mode, kind, blob = entry.split()
+              p = root / "source" / name
+              data = p.read_bytes()
+              actual = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+              assert not p.is_symlink() and actual == blob
+              assert stat.S_IMODE(p.stat().st_mode) == (int(mode, 8) & 0o777)
+              inventory.append({"path": name, "mode": mode, "blob": blob, "bytes": len(data),
+                                "sha256": hashlib.sha256(data).hexdigest()})
+          receipt = {"commit": "852d7643bbb2c4fbed38018196a1a5c2c225e223",
+                     "tree": "b4b25c68efa09cd87f17a45d5d4a21bf0fa143f5", "files": inventory}
+          (root / "evidence/source-before.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          print(json.dumps(receipt), flush=True)
+          PY
+          SH
+
+      - name: Acquire and verify exactly the sixteen r3 wheels
+        id: acquisition
+        env:
+          TASK_ROOT: ${{ runner.temp }}/python-development-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          env -i PATH=/usr/bin:/bin TASK_ROOT="$TASK_ROOT" /usr/bin/python3.12 -I -S -B - <<'PY'
+          import email.parser, hashlib, json, os, pathlib, subprocess, zipfile
+          root = pathlib.Path(os.environ["TASK_ROOT"])
+          rows = [json.loads(line) for line in r'''
+          {"name":"aiohappyeyeballs","version":"2.7.1","requires_python":">=3.10","requires_dist":[],"wheel":{"filename":"aiohappyeyeballs-2.7.1-py3-none-any.whl","requires_python":">=3.10","sha256":"9243213661e29250eb41368e5daa826fc017156c3b8a11440826b2e3ed376472","size":15038,"url":"https://files.pythonhosted.org/packages/71/43/1947f06babed6b3f1d7f38b0c767f52df66bfb2bc10b468c4a7de9eceff2/aiohappyeyeballs-2.7.1-py3-none-any.whl","yanked":false,"yanked_reason":null}}
+          {"name":"aiohttp","version":"3.14.3","requires_python":">=3.10","requires_dist":["aiohappyeyeballs>=2.5.0","aiosignal>=1.4.0","attrs>=17.3.0","frozenlist>=1.1.1","multidict<7.0,>=4.5","propcache>=0.2.0","typing_extensions>=4.4; python_version < \"3.13\"","yarl<2.0,>=1.17.0","async-timeout<6.0,>=4.0; python_version < \"3.11\"","aiodns>=3.3.0; (sys_platform != \"android\" and sys_platform != \"ios\") and extra == \"speedups\"","Brotli>=1.2; (platform_python_implementation == \"CPython\" and sys_platform != \"android\" and sys_platform != \"ios\") and extra == \"speedups\"","brotlicffi>=1.2; platform_python_implementation != \"CPython\" and extra == \"speedups\"","backports.zstd; (platform_python_implementation == \"CPython\" and python_version < \"3.14\" and sys_platform != \"android\" and sys_platform != \"ios\") and extra == \"speedups\""],"wheel":{"filename":"aiohttp-3.14.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl","requires_python":">=3.10","sha256":"543906c127fb1d929b95076db19b83fa2d46751006ff1e23b093aa5ac4d8db42","size":1792122,"url":"https://files.pythonhosted.org/packages/52/b7/7cd31f29d6055bd711ae6e669367fba6f5ae9de463910a793e30556a8db7/aiohttp-3.14.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl","yanked":false,"yanked_reason":null}}
+          {"name":"aiosignal","version":"1.4.0","requires_python":">=3.9","requires_dist":["frozenlist>=1.1.0","typing-extensions>=4.2; python_version < \"3.13\""],"wheel":{"filename":"aiosignal-1.4.0-py3-none-any.whl","requires_python":">=3.9","sha256":"053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e","size":7490,"url":"https://files.pythonhosted.org/packages/fb/76/641ae371508676492379f16e2fa48f4e2c11741bd63c48be4b12a6b09cba/aiosignal-1.4.0-py3-none-any.whl","yanked":false,"yanked_reason":null}}
+          {"name":"attrs","version":"26.1.0","requires_python":">=3.9","requires_dist":[],"wheel":{"filename":"attrs-26.1.0-py3-none-any.whl","requires_python":">=3.9","sha256":"c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309","size":67548,"url":"https://files.pythonhosted.org/packages/64/b4/17d4b0b2a2dc85a6df63d1157e028ed19f90d4cd97c36717afef2bc2f395/attrs-26.1.0-py3-none-any.whl","yanked":false,"yanked_reason":null}}
+          {"name":"frozenlist","version":"1.8.0","requires_python":">=3.9","requires_dist":[],"wheel":{"filename":"frozenlist-1.8.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl","requires_python":">=3.9","sha256":"494a5952b1c597ba44e0e78113a7266e656b9794eec897b19ead706bd7074383","size":242411,"url":"https://files.pythonhosted.org/packages/6a/bd/d91c5e39f490a49df14320f4e8c80161cfcce09f1e2cde1edd16a551abb3/frozenlist-1.8.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl","yanked":false,"yanked_reason":null}}
+          {"name":"idna","version":"3.20","requires_python":">=3.9","requires_dist":["ruff>=0.16.0; extra == \"all\"","mypy>=1.11.2; extra == \"all\"","ty>=0.0.37; extra == \"all\"","pytest>=8.3.2; extra == \"all\"","hypothesis>=6.141.1; extra == \"all\"","coverage>=7.10.0; extra == \"all\""],"wheel":{"filename":"idna-3.20-py3-none-any.whl","requires_python":">=3.9","sha256":"ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c","size":69583,"url":"https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl","yanked":false,"yanked_reason":null}}
+          {"name":"iniconfig","version":"2.3.0","requires_python":">=3.10","requires_dist":[],"wheel":{"filename":"iniconfig-2.3.0-py3-none-any.whl","requires_python":">=3.10","sha256":"f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12","size":7484,"url":"https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl","yanked":false,"yanked_reason":null}}
+          {"name":"multidict","version":"6.9.1","requires_python":">=3.10","requires_dist":["typing-extensions>=4.1.0; python_version < \"3.11\""],"wheel":{"filename":"multidict-6.9.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl","requires_python":">=3.10","sha256":"976fd7689d69ec78d67d31d38d396d8adb562f7e8368279f76aed4aa451fa06d","size":336881,"url":"https://files.pythonhosted.org/packages/ed/5b/db08419c1e1f7c9d60cfd2787b2b517d7ae4ebbda8281b48a33eb5141467/multidict-6.9.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl","yanked":false,"yanked_reason":null}}
+          {"name":"packaging","version":"26.3","requires_python":">=3.9","requires_dist":[],"wheel":{"filename":"packaging-26.3-py3-none-any.whl","requires_python":">=3.9","sha256":"d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c","size":129956,"url":"https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl","yanked":false,"yanked_reason":null}}
+          {"name":"pluggy","version":"1.6.0","requires_python":">=3.9","requires_dist":["pre-commit; extra == \"dev\"","tox; extra == \"dev\"","pytest; extra == \"testing\"","pytest-benchmark; extra == \"testing\"","coverage; extra == \"testing\""],"wheel":{"filename":"pluggy-1.6.0-py3-none-any.whl","requires_python":">=3.9","sha256":"e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746","size":20538,"url":"https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl","yanked":false,"yanked_reason":null}}
+          {"name":"propcache","version":"0.5.4","requires_python":">=3.10","requires_dist":[],"wheel":{"filename":"propcache-0.5.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl","requires_python":">=3.10","sha256":"2814ecd8e818f487bee4b0f921bc4d1c176cc5fc71ac0f072d0fa67eda4ac14b","size":250424,"url":"https://files.pythonhosted.org/packages/85/9f/83a07b6ec0e043c050cfdd35fb0cf1b7897b91d554d6eea293740309afe7/propcache-0.5.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl","yanked":false,"yanked_reason":null}}
+          {"name":"pygments","version":"2.21.0","requires_python":">=3.9","requires_dist":["colorama>=0.4.6; extra == \"windows-terminal\""],"wheel":{"filename":"pygments-2.21.0-py3-none-any.whl","requires_python":">=3.9","sha256":"2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9","size":1250147,"url":"https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl","yanked":false,"yanked_reason":null}}
+          {"name":"pytest","version":"9.1.1","requires_python":">=3.10","requires_dist":["iniconfig>=1.0.1","packaging>=22","pluggy<2,>=1.5","pygments>=2.7.2","colorama>=0.4; sys_platform == \"win32\"","exceptiongroup>=1; python_version < \"3.11\"","tomli>=1; python_version < \"3.11\"","argcomplete; extra == \"dev\"","attrs>=19.2; extra == \"dev\"","hypothesis>=3.56; extra == \"dev\"","mock; extra == \"dev\"","requests; extra == \"dev\"","setuptools; extra == \"dev\"","xmlschema; extra == \"dev\""],"wheel":{"filename":"pytest-9.1.1-py3-none-any.whl","requires_python":">=3.10","sha256":"37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c","size":386536,"url":"https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl","yanked":false,"yanked_reason":null}}
+          {"name":"pytest-asyncio","version":"1.4.0","requires_python":">=3.10","requires_dist":["pytest<10,>=8.4","typing-extensions>=4.12; python_version < \"3.13\"","backports-asyncio-runner<2,>=1.1; python_version < \"3.11\"","sphinx>=5.3; extra == \"docs\"","sphinx-rtd-theme>=1; extra == \"docs\"","sphinx-tabs>=3.5; extra == \"docs\"","coverage>=6.2; extra == \"testing\"","hypothesis>=5.7.1; extra == \"testing\""],"wheel":{"filename":"pytest_asyncio-1.4.0-py3-none-any.whl","requires_python":">=3.10","sha256":"933ca923a23075a87fb7070c0ec272a6848489824d887c85c812670932835aa1","size":16930,"url":"https://files.pythonhosted.org/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl","yanked":false,"yanked_reason":null}}
+          {"name":"typing-extensions","version":"4.16.0","requires_python":">=3.9","requires_dist":[],"wheel":{"filename":"typing_extensions-4.16.0-py3-none-any.whl","requires_python":">=3.9","sha256":"481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8","size":45571,"url":"https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl","yanked":false,"yanked_reason":null}}
+          {"name":"yarl","version":"1.25.1","requires_python":">=3.10","requires_dist":["idna>=2.0","multidict>=4.0","propcache>=0.2.1"],"wheel":{"filename":"yarl-1.25.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl","requires_python":">=3.10","sha256":"c6f117789d22dce188e5754e8bc65b7e6ebf8cb73963b9fa761f672a5883769d","size":117050,"url":"https://files.pythonhosted.org/packages/bc/7b/ca212cbe170ac8b96e45317ecbcf9c3c3ecf0cdec98d5b088a9c4088929b/yarl-1.25.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl","yanked":false,"yanked_reason":null}}
+          '''.splitlines() if line.strip()]
+          assert len(rows) == 16 and len({r["name"] for r in rows}) == 16
+          (root / "lock.json").write_text(json.dumps(rows, indent=2) + "\n")
+          requirements = []
+          metadata = []
+          for row in rows:
+              wheel = row["wheel"]
+              destination = root / "wheels" / wheel["filename"]
+              assert wheel["url"].startswith("https://files.pythonhosted.org/packages/")
+              assert wheel["url"].rsplit("/", 1)[1] == wheel["filename"] == destination.name
+              assert wheel["yanked"] is False
+              response = subprocess.run([
+                  "/usr/bin/curl", "-q", "--fail", "--silent", "--show-error", "--proto", "=https",
+                  "--max-redirs", "0", "--connect-timeout", "10", "--max-time", "30",
+                  "--max-filesize", str(wheel["size"]), "--output", str(destination),
+                  "--write-out", "%{json}", wheel["url"],
+              ], text=True, capture_output=True, timeout=35)
+              print(response.stderr, end="", flush=True)
+              print(response.stdout, flush=True)
+              response.check_returncode()
+              transfer = json.loads(response.stdout)
+              assert transfer["http_code"] == 200 and transfer["url_effective"] == wheel["url"]
+              data = destination.read_bytes()
+              digest = hashlib.sha256(data).hexdigest()
+              assert len(data) == wheel["size"] and digest == wheel["sha256"]
+              with zipfile.ZipFile(destination) as archive:
+                  names = [n for n in archive.namelist() if n.endswith(".dist-info/METADATA")]
+                  assert len(names) == 1
+                  raw = archive.read(names[0])
+                  info = email.parser.BytesParser().parsebytes(raw)
+              metadata.append({"name": row["name"], "filename": wheel["filename"],
+                               "size": len(data), "sha256": digest, "transfer": transfer,
+                               "metadata_sha256": hashlib.sha256(raw).hexdigest(),
+                               "metadata": dict(info.items()), "requires_dist": info.get_all("Requires-Dist", [])})
+              requirements.append(f'{row["name"]}=={row["version"]} --hash=sha256:{digest}')
+              (root / "evidence/wheels.json").write_text(json.dumps(metadata, indent=2) + "\n")
+              print("WHEEL_VERIFIED " + json.dumps({"name": row["name"], "bytes": len(data), "sha256": digest}), flush=True)
+          assert {p.name for p in (root / "wheels").iterdir()} == {r["wheel"]["filename"] for r in rows}
+          (root / "requirements.lock").write_text("\n".join(requirements) + "\n")
+          (root / "evidence/wheels.json").write_text(json.dumps(metadata, indent=2) + "\n")
+          print(json.dumps(metadata), flush=True)
+          PY
+
+      - name: Ordinary offline installation and installed closure verification
+        id: installation
+        env:
+          TASK_ROOT: ${{ runner.temp }}/python-development-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          env -i PATH=/usr/bin:/bin TMPDIR="$TASK_ROOT/tmp" \
+            PIP_CONFIG_FILE=/dev/null PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3.12 -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir \
+            install --no-index --find-links "$TASK_ROOT/wheels" --only-binary=:all: \
+            --no-deps --require-hashes --ignore-installed --no-compile \
+            --target "$TASK_ROOT/dependencies" --report "$TASK_ROOT/evidence/install.json" \
+            -r "$TASK_ROOT/requirements.lock"
+          env -i PATH=/usr/bin:/bin TASK_ROOT="$TASK_ROOT" /usr/bin/python3.12 -I -S -B - <<'PY'
+          import hashlib, importlib.metadata, json, os, pathlib, sys, tomllib
+          root = pathlib.Path(os.environ["TASK_ROOT"])
+          target = root / "dependencies"
+          assert not any("site-packages" in p or "dist-packages" in p for p in sys.path)
+          sys.path.insert(0, str(target))
+          from packaging.markers import default_environment
+          from packaging.requirements import Requirement
+          from packaging.specifiers import SpecifierSet
+          from packaging.tags import sys_tags
+          from packaging.utils import canonicalize_name, parse_wheel_filename
+          rows = json.loads((root / "lock.json").read_text())
+          pins = {r["name"]: r["version"] for r in rows}
+          distributions = list(importlib.metadata.distributions(path=[str(target)]))
+          installed = {canonicalize_name(d.metadata["Name"]): d for d in distributions}
+          assert len(distributions) == len(installed) == 16 and installed.keys() == pins.keys()
+          environment = default_environment() | {"extra": ""}
+          tags = set(sys_tags())
+          active, excluded, receipt = [], [], []
+          def requirement(text, parent):
+              req = Requirement(text)
+              assert not req.url and not req.extras
+              applies = req.marker is None or req.marker.evaluate(environment)
+              (active if applies else excluded).append({"parent": parent, "requirement": text})
+              if applies:
+                  assert canonicalize_name(req.name) in pins
+                  assert pins[canonicalize_name(req.name)] in req.specifier
+          for row in rows:
+              dist = installed[row["name"]]
+              assert dist.version == row["version"]
+              assert sorted(map(str, map(Requirement, dist.requires or []))) == sorted(map(str, map(Requirement, row["requires_dist"])))
+              assert SpecifierSet(dist.metadata["Requires-Python"]) == SpecifierSet(row["requires_python"])
+              assert environment["python_full_version"] in SpecifierSet(row["wheel"]["requires_python"])
+              assert environment["python_full_version"] in SpecifierSet(dist.metadata["Requires-Python"])
+              name, version, build, wheel_tags = parse_wheel_filename(row["wheel"]["filename"])
+              assert name == row["name"] and str(version) == row["version"] and wheel_tags & tags
+              for text in dist.requires or []:
+                  requirement(text, row["name"])
+              metadata_files = [f for f in dist.files if str(f).endswith(".dist-info/METADATA")]
+              assert len(metadata_files) == 1
+              path = pathlib.Path(dist.locate_file(metadata_files[0])).resolve()
+              assert path.is_relative_to(target)
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              wheel = next(w for w in json.loads((root / "evidence/wheels.json").read_text()) if w["name"] == row["name"])
+              assert digest == wheel["metadata_sha256"]
+              receipt.append({"name": row["name"], "version": dist.version, "metadata_path": str(path),
+                              "metadata_sha256": digest, "requires_dist": dist.requires or [],
+                              "requires_python": dist.metadata["Requires-Python"]})
+          assert len(active) == 19 and len(excluded) == 34
+          project = tomllib.loads((root / "source/sdks/python/pyproject.toml").read_text())["project"]
+          roots = project["dependencies"] + project["optional-dependencies"]["dev"]
+          for text in roots:
+              requirement(text, "ROOT")
+          result = {"installed": receipt, "active_including_roots": active, "excluded": excluded,
+                    "marker_environment": environment, "sys_path": sys.path}
+          (root / "evidence/installed-closure.json").write_text(json.dumps(result, indent=2) + "\n")
+          print(json.dumps(result), flush=True)
+          PY
+
+      - name: Collect and run only the unchanged synthetic SDK suite
+        id: tests
+        env:
+          TASK_ROOT: ${{ runner.temp }}/python-development-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          # Existing fakes/socket backstops are not OS-level egress isolation.
+          env -i PATH=/usr/bin:/bin TASK_ROOT="$TASK_ROOT" TMPDIR="$TASK_ROOT/tmp" \
+            PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3.12 -I -S -B - <<'PY'
+          import json, os, pathlib, subprocess, sys, xml.etree.ElementTree as ET
+          root = pathlib.Path(os.environ["TASK_ROOT"])
+          source = root / "source"
+          expected = [
+              "sdks/python/tests/test_client.py::test_build_body",
+              "sdks/python/tests/test_client.py::test_success_preserves_wire_body_and_headers[False]",
+              "sdks/python/tests/test_client.py::test_success_preserves_wire_body_and_headers[True]",
+              "sdks/python/tests/test_client.py::test_empty_flush_close_and_counter_read_have_no_side_effects",
+              "sdks/python/tests/test_client.py::test_sync_failures_count_once_without_retry[connection]",
+              "sdks/python/tests/test_client.py::test_sync_failures_count_once_without_retry[timeout]",
+              "sdks/python/tests/test_client.py::test_sync_failures_count_once_without_retry[401]",
+              "sdks/python/tests/test_client.py::test_sync_failures_count_once_without_retry[500]",
+              "sdks/python/tests/test_client.py::test_async_failures_count_once_and_propagate[connection]",
+              "sdks/python/tests/test_client.py::test_async_failures_count_once_and_propagate[timeout]",
+              "sdks/python/tests/test_client.py::test_async_failures_count_once_and_propagate[401]",
+              "sdks/python/tests/test_client.py::test_async_failures_count_once_and_propagate[500]",
+              "sdks/python/tests/test_client.py::test_cumulative_losses_survive_later_success[False]",
+              "sdks/python/tests/test_client.py::test_cumulative_losses_survive_later_success[True]",
+              "sdks/python/tests/test_client.py::test_sync_flush_paths_account_consistently[False-batch]",
+              "sdks/python/tests/test_client.py::test_sync_flush_paths_account_consistently[False-explicit]",
+              "sdks/python/tests/test_client.py::test_sync_flush_paths_account_consistently[False-timer]",
+              "sdks/python/tests/test_client.py::test_sync_flush_paths_account_consistently[False-close]",
+              "sdks/python/tests/test_client.py::test_sync_flush_paths_account_consistently[True-batch]",
+              "sdks/python/tests/test_client.py::test_sync_flush_paths_account_consistently[True-explicit]",
+              "sdks/python/tests/test_client.py::test_sync_flush_paths_account_consistently[True-timer]",
+              "sdks/python/tests/test_client.py::test_sync_flush_paths_account_consistently[True-close]",
+              "sdks/python/tests/test_client.py::test_sync_base_exception_is_not_newly_suppressed",
+              "sdks/python/tests/test_client.py::test_default_batch_trigger_remains_twenty",
+              "sdks/python/tests/test_client.py::test_apush_still_uses_sync_batch_flush",
+              "sdks/python/tests/test_client.py::test_sync_preparation_errors_count_and_still_propagate[body]",
+              "sdks/python/tests/test_client.py::test_sync_preparation_errors_count_and_still_propagate[serialization]",
+              "sdks/python/tests/test_client.py::test_sync_preparation_errors_count_and_still_propagate[request]",
+              "sdks/python/tests/test_client.py::test_sync_preparation_errors_count_and_still_propagate[header]",
+              "sdks/python/tests/test_client.py::test_async_preparation_errors_count_and_still_propagate[body]",
+              "sdks/python/tests/test_client.py::test_async_preparation_errors_count_and_still_propagate[timeout]",
+              "sdks/python/tests/test_client.py::test_async_preparation_errors_count_and_still_propagate[session]",
+              "sdks/python/tests/test_client.py::test_async_preparation_errors_count_and_still_propagate[session_entry]",
+              "sdks/python/tests/test_client.py::test_async_preparation_errors_count_and_still_propagate[post]",
+              "sdks/python/tests/test_client.py::test_inflight_async_batch_does_not_consume_new_entries[False]",
+              "sdks/python/tests/test_client.py::test_inflight_async_batch_does_not_consume_new_entries[True]",
+              "sdks/python/tests/test_client.py::test_concurrent_async_and_sync_failures_do_not_lose_increments",
+              "sdks/python/tests/test_client.py::test_socket_backstop_denies_connections_and_dns",
+              "sdks/python/tests/test_handler.py::TestLokiHandler::test_handler_emits_json",
+              "sdks/python/tests/test_handler.py::TestLokiHandler::test_handler_extra_fields",
+              "sdks/python/tests/test_handler.py::TestLokiHandler::test_handler_flush_and_close",
+              "sdks/python/tests/test_handler.py::TestLokiHandler::test_format_record_structure",
+          ]
+          # -I -S excludes user/site packages, .pth, startup customization and cwd.
+          # Add only the genuine installed target and immutable SDK source.
+          bootstrap = (
+              "import importlib.util,json,pathlib,runpy,sys;"
+              "assert not any('site-packages' in p or 'dist-packages' in p for p in sys.path);"
+              f"sys.path[:0]={[str(root / 'dependencies'), str(source / 'sdks/python/src')]!r};"
+              "origins={n:importlib.util.find_spec(n).origin for n in ('pytest','aiohttp','lokikit')};"
+              f"assert all(pathlib.Path(origins[n]).is_relative_to({str(root / 'dependencies')!r}) for n in ('pytest','aiohttp'));"
+              f"assert pathlib.Path(origins['lokikit']).is_relative_to({str(source / 'sdks/python/src')!r});"
+              "print('IMPORT_ORIGINS '+json.dumps(origins),flush=True);"
+              "print('ISOLATED_SYS_PATH '+json.dumps(sys.path),flush=True);"
+              "runpy.run_module('pytest',run_name='__main__')"
+          )
+          base = [sys.executable, "-I", "-S", "-B", "-c", bootstrap,
+                  "-c", str(source / "sdks/python/pyproject.toml"), "--rootdir", str(source),
+                  "--import-mode=importlib", "-p", "no:cacheprovider", "--color=no",
+                  "-W", "always", "-o", "xfail_strict=true", "sdks/python/tests"]
+          collected = subprocess.run(base + ["--collect-only", "-q"], cwd=source,
+                                     text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+          (root / "evidence/collection.log").write_text(collected.stdout)
+          print(collected.stdout, end="", flush=True)
+          nodes = [s.strip() for s in collected.stdout.splitlines() if s.startswith("sdks/python/tests/") and "::" in s]
+          receipt = {"exit": collected.returncode, "nodeids": nodes, "expected": expected,
+                     "matches": len(nodes) == len(set(nodes)) == 42 and set(nodes) == set(expected)}
+          (root / "evidence/collection.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          collected.check_returncode()
+          assert receipt["matches"], "collection differs from the fixed 42 cases"
+          # Stream normal pytest output; JUnit retains individual results on failure.
+          result = subprocess.run(base + ["-x", "-vv", "-rA", "--capture=tee-sys",
+                                         "--junitxml", str(root / "evidence/tests.xml"),
+                                         "-o", "junit_logging=all", "-o", "junit_log_passing_tests=true"],
+                                  cwd=source, timeout=300)
+          (root / "evidence/test-exit.json").write_text(json.dumps({"exit": result.returncode}) + "\n")
+          result.check_returncode()
+          cases = ET.parse(root / "evidence/tests.xml").findall(".//testcase")
+          wanted = set()
+          for node in expected:
+              path, *parts = node.split("::")
+              wanted.add((".".join([path[:-3].replace("/", "."), *parts[:-1]]), parts[-1]))
+          actual = {(case.get("classname"), case.get("name")) for case in cases}
+          assert len(cases) == len(actual) == 42 and actual == wanted
+          assert not any(case.find(tag) is not None for case in cases for tag in ("skipped", "failure", "error"))
+          (root / "evidence/results.json").write_text(json.dumps({"cases": 42, "nodeids": nodes, "all_passed": True}) + "\n")
+          PY
+
+      - name: Always report phase outcomes, complete evidence and source preservation
+        id: evidence
+        if: ${{ always() }}
+        env:
+          TASK_ROOT: ${{ runner.temp }}/python-development-${{ github.run_id }}-${{ github.run_attempt }}
+          ADMISSION: ${{ steps.admission.outcome }}
+          SOURCE: ${{ steps.source.outcome }}
+          ACQUISITION: ${{ steps.acquisition.outcome }}
+          INSTALLATION: ${{ steps.installation.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+        run: |
+          env -i PATH=/usr/bin:/bin TASK_ROOT="$TASK_ROOT" \
+            ADMISSION="$ADMISSION" SOURCE="$SOURCE" ACQUISITION="$ACQUISITION" \
+            INSTALLATION="$INSTALLATION" TESTS="$TESTS" \
+            /usr/bin/python3.12 -I -S -B - <<'PY'
+          import hashlib, json, os, pathlib, stat
+          root = pathlib.Path(os.environ["TASK_ROOT"])
+          outcomes = {k.lower(): os.environ[k] for k in ("ADMISSION", "SOURCE", "ACQUISITION", "INSTALLATION", "TESTS")}
+          print("PHASE_OUTCOMES " + json.dumps(outcomes), flush=True)
+          evidence = root / "evidence"
+          # Print full retained records even when an earlier stage fails.
+          for p in sorted(evidence.glob("*")):
+              print(f"--- {p.name} sha256={hashlib.sha256(p.read_bytes()).hexdigest()} ---", flush=True)
+              print(p.read_text(), flush=True)
+          before = evidence / "source-before.json"
+          if before.exists():
+              receipt = json.loads(before.read_text())
+              changes = []
+              for entry in receipt["files"]:
+                  p = root / "source" / entry["path"]
+                  if not p.is_file() or p.is_symlink():
+                      changes.append(entry["path"])
+                      continue
+                  if (hashlib.sha256(p.read_bytes()).hexdigest() != entry["sha256"]
+                          or stat.S_IMODE(p.stat().st_mode) != (int(entry["mode"], 8) & 0o777)):
+                      changes.append(entry["path"])
+              actual = {str(p.relative_to(root / "source")) for p in (root / "source").rglob("*")
+                        if ".git" not in p.relative_to(root / "source").parts and (not p.is_dir() or p.is_symlink())}
+              expected = {entry["path"] for entry in receipt["files"]}
+              preservation = {"commit": receipt["commit"], "tree": receipt["tree"], "files": len(expected),
+                              "changed": changes, "extra": sorted(actual - expected), "missing": sorted(expected - actual)}
+              print("SOURCE_PRESERVATION " + json.dumps(preservation), flush=True)
+              (evidence / "source-after.json").write_text(json.dumps(preservation, indent=2) + "\n")
+              assert not changes and actual == expected, "source preservation failure"
+          else:
+              print('SOURCE_PRESERVATION {"status":"not_available_before_source_acquisition_completed"}', flush=True)
+          if all(value == "success" for value in outcomes.values()):
+              required = ("runtime.json", "pip-identity.json", "source-tree.txt", "source-before.json",
+                          "wheels.json", "install.json", "installed-closure.json", "collection.log",
+                          "collection.json", "test-exit.json", "tests.xml", "results.json", "source-after.json")
+              assert all((evidence / name).is_file() for name in required), "incomplete evidence"
+          print("Bounded synthetic SDK evidence only; not OS egress, real transport, packaging-consumer, vulnerability, or D1/R0/6DQ certification.", flush=True)
+          print('EVIDENCE_REPORT {"status":"complete","storage":"GitHub job logs; no artifact upload"}', flush=True)
+          PY
