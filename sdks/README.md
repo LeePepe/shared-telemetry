@@ -10,7 +10,7 @@ Use this page to choose a language and match its contract to a consumer dependen
 | Web | `@leepepe/loki-web`; [src/index.ts](web/src/index.ts) exports the public API; package exports target `dist/index.js`, `dist/index.cjs`, `dist/index.d.ts` | [Web usage and limitations](web/README.md) for browser/Node lifecycle and queue behavior |
 | Python | `lokikit`; [src/lokikit/__init__.py](python/src/lokikit/__init__.py) exports `LokiClient` and `LokiHandler` | Read [baseline and current candidate caveats below](#python-baseline-caveats) with the [Python README](python/README.md) |
 
-SDKs accept a configured receiver; the checked-in stack and analyzer are not demonstrated runtime prerequisites. For integration planning read [onboarding](../docs/onboarding-checklist.md); for version discovery and migration read [AI-assisted usage](../docs/ai-usage.md).
+SDKs accept a configured receiver; the checked-in stack and analyzer are not demonstrated runtime prerequisites. For integration planning read [onboarding](../docs/onboarding-checklist.md). Swift version discovery/migration starts with the [version-bound contract](../ai/README.md); Web/Python use the installed package entries linked from their SDK READMEs. The older [AI-assisted usage note](../docs/ai-usage.md) is historical context.
 
 ## Compatibility and distribution
 

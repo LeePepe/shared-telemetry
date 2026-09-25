@@ -1,5 +1,12 @@
 # AI-assisted consumer usage
 
+> Historical source-reconciliation note. For the current Swift release unit,
+> start with the version-bound [AI contract](../ai/README.md), registry and
+> executable external fixture. Claims below that no registry or executable
+> consumer exists describe the historical slice, not that newer Swift contract.
+> Web/Python artifact contracts are owned by their SDKs; follow their installed
+> package entries and matching README rather than assuming root docs ship in them.
+
 Read this page when using AI assistance to integrate, change, upgrade or investigate a consumer of shared-telemetry. The historical source contract is `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`; the current candidate also incorporates the Python delta from `852d7643bbb2c4fbed38018196a1a5c2c225e223`. The [SDK index](../sdks/README.md#python-baseline-caveats) separates that source's bounded hosted test evidence from unexecuted combined-PR and consumer verification. Accepted delivery targets are not established by a development-slice pass.
 
 “AI usage” means assistance consuming the library's public contract. It is not permission to transmit user data to an AI service. These documents are task material, not new agent instructions, runtime policy or operational authority. Product-owned semantics, data approval and operational permissions remain with their existing owners.
