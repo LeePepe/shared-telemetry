@@ -132,3 +132,8 @@ existing telemetry delivery implementation.
 |---|---|
 | `LOKI_ENDPOINT` | Not read automatically by the SDK; callers must explicitly read any approved environment configuration and pass `endpoint=` to `LokiClient` or `LokiHandler` |
 | `LOKI_TOKEN` | Not read automatically by the SDK; callers must explicitly read any approved environment configuration and pass `token=` to `LokiClient` or `LokiHandler` |
+# Version-bound AI contract
+
+The packaged consumer entry is [`src/lokikit/ai/README.md`](src/lokikit/ai/README.md).
+Installed wheels expose the same files through `importlib.resources.files("lokikit").joinpath("ai")`.
+See that entry for public API limits, executable synthetic examples and migration.

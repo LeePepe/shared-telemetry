@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LokiKit Python AI registry v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "library", "releaseUnit", "package", "version", "releaseStatus", "wireSchema", "documents", "capabilities"],
+  "properties": {
+    "$schema": {"const": "registry.schema.json"}, "schemaVersion": {"const": 1},
+    "library": {"const": "shared-telemetry"}, "releaseUnit": {"const": "lokikit-python"},
+    "package": {"const": "lokikit"}, "version": {"const": "0.1.0"},
+    "releaseStatus": {"enum": ["unreleased", "released"]},
+    "wireSchema": {"const": "loki-push-v1; inner line not versioned"},
+    "documents": {
+      "type": "object", "additionalProperties": false,
+      "required": ["entry", "usage", "integration", "examples", "compatibility", "migration", "changelog"],
+      "properties": {
+        "entry": {"const": "README.md"}, "usage": {"const": "USAGE.md"},
+        "integration": {"const": "INTEGRATION.md"}, "examples": {"const": "EXAMPLES.md"},
+        "compatibility": {"const": "COMPATIBILITY.md"}, "migration": {"const": "MIGRATION.md"},
+        "changelog": {"const": "CHANGELOG.md"}
+      }
+    },
+    "capabilities": {"type": "array", "minItems": 2, "maxItems": 2,
+      "items": {"type": "object", "additionalProperties": false,
+        "required": ["id", "symbol", "documentation", "example"],
+        "properties": {
+          "id": {"enum": ["batch-client", "logging-handler"]},
+          "symbol": {"enum": ["lokikit.LokiClient", "lokikit.LokiHandler"]},
+          "documentation": {"const": "USAGE.md"}, "example": {"const": "examples/synthetic.py"}
+        }
+      }
+    }
+  }
+}

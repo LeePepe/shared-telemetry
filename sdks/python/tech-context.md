@@ -4,6 +4,7 @@ owns: [sdks/python/**]
 depends_on: []
 gate:
   test: python3 -m pytest -q sdks/python/tests
+  distribution: python3 sdks/python/scripts/check_distribution.py
 red_lines:
   - Never raise into the host application from the logging path; failures are counted, not thrown.
   - No credentials in code, tests or fixtures; the bearer token comes from the caller or LOKI_TOKEN.
