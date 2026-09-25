@@ -1,0 +1,20 @@
+{
+  "$schema": "registry.schema.json", "schemaVersion": 1,
+  "library": "shared-telemetry", "releaseUnit": "LokiKit-swift",
+  "product": "LokiKit", "module": "LokiKit", "version": "0.1.0", "releaseStatus": "unreleased",
+  "wireSchema": "loki-push-v1; inner line not versioned",
+  "documents": {"entry": "README.md", "usage": "USAGE.md", "integration": "INTEGRATION.md", "examples": "EXAMPLES.md", "compatibility": "COMPATIBILITY.md", "migration": "MIGRATION.md", "changelog": "CHANGELOG.md"},
+  "capabilities": [
+    {"symbol": "Logger", "source": "../sdks/swift/Sources/LokiKit/Logger.swift"},
+    {"symbol": "LogLevel", "source": "../sdks/swift/Sources/LokiKit/LogLevel.swift"},
+    {"symbol": "PrintLogger", "source": "../sdks/swift/Sources/LokiKit/PrintLogger.swift"},
+    {"symbol": "TelemetryEvent", "source": "../sdks/swift/Sources/LokiKit/TelemetryService.swift"},
+    {"symbol": "TelemetryService", "source": "../sdks/swift/Sources/LokiKit/TelemetryService.swift"},
+    {"symbol": "NoopTelemetryService", "source": "../sdks/swift/Sources/LokiKit/TelemetryService.swift"},
+    {"symbol": "LokiTelemetryService", "source": "../sdks/swift/Sources/LokiKit/LokiTelemetryService.swift"},
+    {"symbol": "LokiLogSink", "source": "../sdks/swift/Sources/LokiKit/LokiLogSink.swift"},
+    {"symbol": "TelemetryDeckService", "source": "../sdks/swift/Sources/LokiKit/TelemetryDeckService.swift"},
+    {"symbol": "TelemetryEventName", "source": "../sdks/swift/Sources/LokiKit/VoxPocketTelemetryEventNames.swift"}
+  ],
+  "example": "examples/swift/Tests/ConsumerTests/ConsumerTests.swift"
+}
