@@ -1,0 +1,14 @@
+{
+  "$schema": "registry.schema.json",
+  "schemaVersion": 1,
+  "library": "shared-telemetry",
+  "releaseUnit": "loki-web",
+  "package": "@leepepe/loki-web",
+  "version": "0.1.0",
+  "releaseStatus": "unreleased",
+  "wireSchema": "loki-push-v1; inner line not versioned",
+  "documents": {"entry": "README.md", "usage": "USAGE.md", "integration": "INTEGRATION.md", "examples": "EXAMPLES.md", "compatibility": "COMPATIBILITY.md", "migration": "MIGRATION.md", "changelog": "CHANGELOG.md"},
+  "runtimeExports": ["LokiTelemetry", "PrintLogger", "LokiShipper", "buildPushBody", "PersistentQueue", "STORAGE_KEY"],
+  "typeExports": ["Logger", "LogLevel", "Labels", "Props", "StorageMode", "TelemetryEvent", "TelemetryOptions", "LokiStream", "LokiPushBody"],
+  "example": "examples/consumer.ts"
+}

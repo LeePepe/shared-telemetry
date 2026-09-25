@@ -88,3 +88,8 @@ There is no general event/context redaction or consent gate. `PrintLogger` can p
 `token` produces an `Authorization: Bearer …` header on fetch; beacon cannot add that header and is skipped when a token is present. This is not proof of authenticated reception or Grafana Cloud compatibility. The prior base64-token recipe is unsupported. Keep credential values out of examples and verify the actual receiver's contract separately.
 
 For accepted target gaps and version-bound migration read [AI-assisted usage](../../docs/ai-usage.md); for proposed storage drills read [disaster recovery](../../docs/disaster-recovery.md). No build, SDK import/execution, test, install or live endpoint check accompanies this documentation candidate.
+# Version-bound AI contract
+
+Read [`ai/README.md`](ai/README.md) for the packaged public API, executable
+consumer, migration and compatibility limits. The npm tarball includes that
+contract as filesystem data; it is not an ESM export.

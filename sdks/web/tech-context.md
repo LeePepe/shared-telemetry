@@ -7,6 +7,8 @@ gate:
   typecheck: npm --prefix sdks/web run typecheck
   test: npm --prefix sdks/web run test -- --run
   build: npm --prefix sdks/web run build
+  contract: npm --prefix sdks/web run test:contract
+  distribution: npm --prefix sdks/web run test:distribution
 red_lines:
   - No runtime dependencies; the published bundle stays dependency-free.
   - Payloads carry only caller-supplied labels and fields; the SDK never collects page content or user input on its own.
