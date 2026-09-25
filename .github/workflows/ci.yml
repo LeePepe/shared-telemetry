@@ -32,7 +32,7 @@ jobs:
       runs-on: ubuntu-latest
       setup-command: scripts/ci/setup.sh
       verify-command: scripts/verify --policy
-      build-command: scripts/verify --layer SwiftSDK
+      build-command: scripts/verify --layer SwiftSDK && python3 sdks/swift/scripts/external_consumer.py --revision "$(git rev-parse HEAD)"
       build-runs-on: macos-26
       test-command: scripts/verify --layer WebSDK --layer PythonSDK --layer ProjectAnalyzer
       contract-audit: true

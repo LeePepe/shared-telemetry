@@ -1,8 +1,10 @@
 ---
 layer: SwiftSDK
-owns: [sdks/swift/**, Package.swift]
+owns: [sdks/swift/**, Package.swift, ai/**]
 depends_on: []
 gate:
+  contract: python3 sdks/swift/scripts/check_contract.py
+  contract_tests: python3 sdks/swift/scripts/test_contract.py
   build: swift build
   test: swift test
 red_lines:

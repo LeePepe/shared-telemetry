@@ -7,7 +7,7 @@ Shared telemetry SDKs and existing Loki/Grafana deployment assets. The canonical
 | Task | Read |
 |---|---|
 | Understand modules, dependencies and existing exceptions | [Architecture](docs/architecture.md) |
-| Consume or upgrade the library with AI assistance; match docs to a dependency pin | [AI-assisted usage](docs/ai-usage.md) |
+| Consume or upgrade Swift with AI assistance; match docs to a dependency pin | [Version-bound Swift contract](ai/README.md); other SDKs: [SDK index](sdks/README.md) |
 | Choose a language, entry point or compatibility baseline | [SDK index](sdks/README.md) |
 | Plan consumer wiring and its later verification | [Onboarding checklist](docs/onboarding-checklist.md) |
 | Inventory recoverable assets or propose an isolated drill | [Disaster recovery](docs/disaster-recovery.md) |
@@ -31,4 +31,4 @@ Shared telemetry SDKs and existing Loki/Grafana deployment assets. The canonical
 
 **Accepted target:** version-matched consumer contracts, product-local event semantics, and validated cross-SDK privacy, error and delivery behavior. A shared Loki push structure is present; a unified event envelope is not established. See [current versus target](docs/architecture.md#current-versus-accepted-target).
 
-**Proposed/unexecuted:** onboarding verification, migration/rollback and recovery procedures require their own scoped execution and evidence. Every code example in this documentation candidate is **illustrative/source-reviewed, not executed**. This slice is neither release acceptance nor completion of the packaged AI contract or T037. It contains no operational quick start; stack operations require separate review.
+**Separate evidence required:** onboarding, product migration/rollback and recovery procedures need scoped execution. Existing README snippets remain illustrative; the [Swift public-product fixture](ai/EXAMPLES.md) is executable and verified separately per candidate. This is not release acceptance, complete cross-SDK contract delivery or T037 completion. It contains no operational quick start; stack operations require separate review.
