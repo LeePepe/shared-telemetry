@@ -4,9 +4,14 @@ import {mkdtemp, cp, readFile, writeFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {checkContract} from './check-distribution.mjs';
+import {checkContract, checkLockfile} from './check-distribution.mjs';
 
 const sdk = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+test('environment-specific package mirrors cannot enter the public lockfile', () => {
+  checkLockfile({packages: {dependency: {resolved: 'https://registry.npmjs.org/example/-/example-1.0.0.tgz'}}});
+  assert.throws(() => checkLockfile({packages: {dependency: {resolved: 'https://synthetic.invalid/example.tgz'}}}), /WEB_AI_REGISTRY/);
+});
 
 async function fixture(run) {
   const directory = await mkdtemp(path.join(tmpdir(), 'loki-web-contract-'));

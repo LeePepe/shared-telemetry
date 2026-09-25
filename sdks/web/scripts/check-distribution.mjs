@@ -9,6 +9,13 @@ import {createHash} from 'node:crypto';
 const sdk = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readJSON = async file => JSON.parse(await readFile(file, 'utf8'));
 
+export function checkLockfile(lockfile) {
+  for (const entry of Object.values(lockfile.packages)) {
+    if (entry.resolved && !entry.resolved.startsWith('https://registry.npmjs.org/'))
+      throw new Error('WEB_AI_REGISTRY: distribution lockfile must use the public npm registry');
+  }
+}
+
 export async function checkContract(packageRoot) {
   const ai = await realpath(path.join(packageRoot, 'ai'));
   const registry = await readJSON(path.join(ai, 'registry.json'));
@@ -49,6 +56,7 @@ function run(command, args, cwd) {
 }
 
 async function main() {
+  checkLockfile(await readJSON(path.join(sdk, 'package-lock.json')));
   const scratch = await mkdtemp(path.join(tmpdir(), 'loki-web-consumer-'));
   try {
     const packed = JSON.parse(execFileSync('npm', ['pack', '--json', '--pack-destination', scratch], {cwd: sdk, encoding: 'utf8'}));
