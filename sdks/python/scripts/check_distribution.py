@@ -54,6 +54,13 @@ def run(*args, cwd):
     subprocess.run(args, cwd=cwd, check=True)
 
 
+def check_resource_bytes(actual, expected):
+    if not set(expected) <= set(actual):
+        raise ValueError("PY_AI_ARTIFACT: distribution omits contract resources")
+    if any(actual[name] != content for name, content in expected.items()):
+        raise ValueError("PY_AI_ARTIFACT: distributed contract differs from validated source")
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="lokikit-python-dist-") as directory:
         root = Path(directory)
@@ -63,17 +70,17 @@ def main():
         sdists = list(output.glob("*.tar.gz"))
         if len(wheels) != 1 or len(sdists) != 1:
             raise ValueError("PY_AI_ARTIFACT: expected one wheel and one sdist")
-        expected = {str(path.relative_to(SDK / "src"))
+        expected = {str(path.relative_to(SDK / "src")): path.read_bytes()
                     for path in (SDK / "src/lokikit/ai").rglob("*")
                     if path.is_file() and path.suffix in {".md", ".json", ".py"}}
         with zipfile.ZipFile(wheels[0]) as archive:
-            if not expected <= set(archive.namelist()):
-                raise ValueError("PY_AI_ARTIFACT: wheel omits contract resources")
+            check_resource_bytes({name: archive.read(name) for name in archive.namelist()
+                                  if name in expected}, expected)
         with tarfile.open(sdists[0]) as archive:
-            members = {"/".join(name.split("/")[2:]) for name in archive.getnames()
-                       if "/src/" in name}
-            if not expected <= members:
-                raise ValueError("PY_AI_ARTIFACT: sdist omits contract resources")
+            members = {"/".join(member.name.split("/")[2:]): member
+                       for member in archive.getmembers() if "/src/" in member.name and member.isfile()}
+            check_resource_bytes({name: archive.extractfile(member).read()
+                                  for name, member in members.items() if name in expected}, expected)
         environment = root / "venv"
         venv.EnvBuilder(with_pip=True).create(environment)
         python = environment / "bin/python"

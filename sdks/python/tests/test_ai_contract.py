@@ -56,3 +56,14 @@ def test_document_cannot_escape_installed_package(package):
     (package / "ai/README.md").write_text("[bad](../../outside.md)")
     with pytest.raises(ValueError, match="PY_AI_PATH"):
         CHECK.check_contract(package, "0.1.0")
+
+
+def test_missing_distribution_resource_fails():
+    with pytest.raises(ValueError, match="PY_AI_ARTIFACT"):
+        CHECK.check_resource_bytes({}, {"lokikit/ai/README.md": b"contract"})
+
+
+def test_distribution_cannot_rewrite_validated_contract():
+    with pytest.raises(ValueError, match="PY_AI_ARTIFACT"):
+        CHECK.check_resource_bytes({"lokikit/ai/README.md": b"changed"},
+                                   {"lokikit/ai/README.md": b"contract"})
