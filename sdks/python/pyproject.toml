@@ -17,7 +17,12 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
+    "build>=1.2",
+    "jsonschema>=4.23",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+lokikit = ["ai/*.md", "ai/*.json", "ai/examples/*.py"]
