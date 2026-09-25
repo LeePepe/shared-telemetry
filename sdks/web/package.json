@@ -17,19 +17,23 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "ai"
   ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:contract": "node --test scripts/check-distribution.test.mjs",
+    "test:distribution": "node scripts/check-distribution.mjs"
   },
   "engines": {
     "node": ">=18"
   },
   "private": true,
   "devDependencies": {
+    "ajv": "8.18.0",
     "@types/node": "^20.11.0",
     "happy-dom": "^13.0.0",
     "tsup": "^8.0.0",

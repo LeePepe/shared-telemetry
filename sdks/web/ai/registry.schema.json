@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Loki Web AI registry v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "library", "releaseUnit", "package", "version", "releaseStatus", "wireSchema", "documents", "runtimeExports", "typeExports", "example"],
+  "properties": {
+    "$schema": {"const": "registry.schema.json"}, "schemaVersion": {"const": 1},
+    "library": {"const": "shared-telemetry"}, "releaseUnit": {"const": "loki-web"},
+    "package": {"const": "@leepepe/loki-web"}, "version": {"const": "0.1.0"},
+    "releaseStatus": {"enum": ["unreleased", "released"]},
+    "wireSchema": {"const": "loki-push-v1; inner line not versioned"},
+    "documents": {"type": "object", "additionalProperties": false,
+      "required": ["entry", "usage", "integration", "examples", "compatibility", "migration", "changelog"],
+      "properties": {"entry": {"const": "README.md"}, "usage": {"const": "USAGE.md"}, "integration": {"const": "INTEGRATION.md"}, "examples": {"const": "EXAMPLES.md"}, "compatibility": {"const": "COMPATIBILITY.md"}, "migration": {"const": "MIGRATION.md"}, "changelog": {"const": "CHANGELOG.md"}}
+    },
+    "runtimeExports": {"type": "array", "minItems": 6, "maxItems": 6, "uniqueItems": true, "items": {"enum": ["LokiTelemetry", "PrintLogger", "LokiShipper", "buildPushBody", "PersistentQueue", "STORAGE_KEY"]}},
+    "typeExports": {"type": "array", "minItems": 9, "maxItems": 9, "uniqueItems": true, "items": {"enum": ["Logger", "LogLevel", "Labels", "Props", "StorageMode", "TelemetryEvent", "TelemetryOptions", "LokiStream", "LokiPushBody"]}},
+    "example": {"const": "examples/consumer.ts"}
+  }
+}
