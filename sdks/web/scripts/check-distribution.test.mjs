@@ -4,9 +4,16 @@ import {mkdtemp, cp, readFile, writeFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {checkContract, checkLockfile} from './check-distribution.mjs';
+import {checkContract, checkLicenseBytes, checkLockfile} from './check-distribution.mjs';
 
 const sdk = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+test('distribution license must be present and byte-identical', () => {
+  const expected = Buffer.from('license');
+  checkLicenseBytes(Buffer.from('license'), expected);
+  assert.throws(() => checkLicenseBytes(undefined, expected), /WEB_LICENSE:/);
+  assert.throws(() => checkLicenseBytes(Buffer.from('changed'), expected), /WEB_LICENSE:/);
+});
 
 test('environment-specific package mirrors cannot enter the public lockfile', () => {
   checkLockfile({packages: {dependency: {resolved: 'https://registry.npmjs.org/example/-/example-1.0.0.tgz'}}});
