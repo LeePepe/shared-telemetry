@@ -1,7 +1,7 @@
 ---
 layer: _root
 support:
-  - patterns: ["*.md", "sdks/README.md", "docs/**", "skills/**", ".claude/**"]
+  - patterns: ["*.md", "LICENSE", "sdks/README.md", "docs/**", "skills/**", ".claude/**"]
     reason: documentation, integration skill and agent configuration; checked by the contract audit, not a layer gate
   - patterns: [".github/**", ".githooks/**", "scripts/**", ".gitignore"]
     reason: CI, hooks, the verify entry and repository utilities; checked by the contract audit and workflow-lint
