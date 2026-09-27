@@ -18,6 +18,7 @@
   "files": [
     "dist",
     "README.md",
+    "LICENSE",
     "ai"
   ],
   "scripts": {

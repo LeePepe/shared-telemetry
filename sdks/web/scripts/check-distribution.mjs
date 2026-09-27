@@ -9,6 +9,11 @@ import {createHash} from 'node:crypto';
 const sdk = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readJSON = async file => JSON.parse(await readFile(file, 'utf8'));
 
+export function checkLicenseBytes(actual, expected) {
+  if (!actual) throw new Error('WEB_LICENSE: npm tarball omits package/LICENSE');
+  if (!actual.equals(expected)) throw new Error('WEB_LICENSE: distributed LICENSE differs from repository root LICENSE');
+}
+
 export function checkLockfile(lockfile) {
   for (const entry of Object.values(lockfile.packages)) {
     if (entry.resolved && !entry.resolved.startsWith('https://registry.npmjs.org/'))
@@ -62,6 +67,13 @@ async function main() {
     const packed = JSON.parse(execFileSync('npm', ['pack', '--json', '--pack-destination', scratch], {cwd: sdk, encoding: 'utf8'}));
     if (packed.length !== 1) throw new Error('WEB_AI_ARTIFACT: expected one tarball');
     const artifact = path.join(scratch, packed[0].filename);
+    let license;
+    try {
+      license = execFileSync('tar', ['-xOf', artifact, 'package/LICENSE'], {stdio: ['ignore', 'pipe', 'pipe']});
+    } catch {
+      throw new Error('WEB_LICENSE: npm tarball has no readable package/LICENSE');
+    }
+    checkLicenseBytes(license, await readFile(path.join(sdk, '../../LICENSE')));
     await writeFile(path.join(scratch, 'package.json'), JSON.stringify({name: 'synthetic-consumer', private: true, type: 'module'}));
     run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', artifact], scratch);
     const installed = path.join(scratch, 'node_modules/@leepepe/loki-web');

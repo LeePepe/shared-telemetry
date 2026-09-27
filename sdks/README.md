@@ -1,6 +1,8 @@
 # SDK index
 
-Use this page to choose a language and match its contract to a consumer dependency. Historical source baseline: `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`. The current candidate also incorporates the Python loss-accounting and async-timeout delta from `852d7643bbb2c4fbed38018196a1a5c2c225e223`, distinguished below. Source behavior, accepted upgrade targets and verification evidence remain separate statuses; examples and combined runtime combinations remain unexecuted.
+Use this page to choose a language and match its contract to a consumer dependency. Historical source baseline: `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`. The `v0.1.0` release also incorporates the Python loss-accounting and async-timeout delta from `852d7643bbb2c4fbed38018196a1a5c2c225e223`, distinguished below. Source behavior, accepted upgrade targets and verification evidence remain separate statuses; examples and combined runtime combinations remain unexecuted.
+
+Consume the annotated git tag `v0.1.0` at commit `5f4b4d97d7ad05adb849e0d8937c8745d9b6d15f`: Swift SPM uses `exact: "0.1.0"`; build Python/Web packages from the `v0.1.0` tagged tree. There is no PyPI or npm registry publication.
 
 ## Entry points
 
@@ -8,7 +10,7 @@ Use this page to choose a language and match its contract to a consumer dependen
 |---|---|---|
 | Swift | `LokiKit` product and import; [root manifest](../Package.swift) or [nested manifest](swift/Package.swift), both using the same source | [Swift usage and limitations](swift/README.md) for telemetry, logging or TelemetryDeck integration |
 | Web | `@leepepe/loki-web`; [src/index.ts](web/src/index.ts) exports the public API; package exports target `dist/index.js`, `dist/index.cjs`, `dist/index.d.ts` | [Web usage and limitations](web/README.md) for browser/Node lifecycle and queue behavior |
-| Python | `lokikit`; [src/lokikit/__init__.py](python/src/lokikit/__init__.py) exports `LokiClient` and `LokiHandler` | Read [baseline and current candidate caveats below](#python-baseline-caveats) with the [Python README](python/README.md) |
+| Python | `lokikit`; [src/lokikit/__init__.py](python/src/lokikit/__init__.py) exports `LokiClient` and `LokiHandler` | Read [baseline and v0.1.0 caveats below](#python-baseline-caveats) with the [Python README](python/README.md) |
 
 SDKs accept a configured receiver; the checked-in stack and analyzer are not demonstrated runtime prerequisites. For integration planning read [onboarding](../docs/onboarding-checklist.md). Swift version discovery/migration starts with the [version-bound contract](../ai/README.md); Web/Python use the installed package entries linked from their SDK READMEs. The older [AI-assisted usage note](../docs/ai-usage.md) is historical context.
 
@@ -20,11 +22,11 @@ SDKs accept a configured receiver; the checked-in stack and analyzer are not dem
 | Web | Node `>=18`; uses global `fetch` | [package.json](web/package.json) says `0.1.0`, `private: true`, no runtime dependencies; ESM/CJS/types paths are declarations, not validated artifacts | Not established in this review; evergreen-browser support is an existing documentation claim, not a tested matrix |
 | Python | Python `>=3.10`, `aiohttp>=3.9` | [pyproject.toml](python/pyproject.toml) says `0.1.0`; no SDK publication or installed-SDK-wheel validation established here | Source `852d7643…`: 42 synthetic SDK cases passed in the bounded hosted development run below; not combined PR-head or required-CI evidence |
 
-The manifest/distribution facts above were inspected at historical baseline `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`; the Python source delta and its bounded test result are identified separately, not generalized to floating branches or the combined candidate. No deprecation schedule or tested cross-version migration is established here. A package version alone is not proof of publication. The accepted target is version-bound documentation plus validated consumer artifacts; those checks remain proposed/unexecuted.
+The manifest/distribution facts above were inspected at historical baseline `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`; the Python source delta and its bounded test result are identified separately, not generalized to floating branches or the `v0.1.0` tagged tree. No deprecation schedule or tested cross-version migration is established here. A package version alone is not proof of publication. The accepted target is version-bound documentation plus validated consumer artifacts; this historical review does not establish those checks.
 
 ## Python baseline caveats
 
-At the historical baseline, Python had no loss-counter API and no explicit `aiohttp` total timeout. The current candidate incorporates source `852d7643bbb2c4fbed38018196a1a5c2c225e223`: loss accounting and an explicit async timeout, not a delivery redesign or released fix. The [Python README](python/README.md) describes that delta; its environment-variable table is reconciled to explicit constructor configuration. Its examples and installation claims remain unexecuted/unvalidated. Use the [client](python/src/lokikit/client.py) and [handler](python/src/lokikit/handler.py) at the selected revision to resolve discrepancies.
+At the historical baseline, Python had no loss-counter API and no explicit `aiohttp` total timeout. The `v0.1.0` tag incorporates source `852d7643bbb2c4fbed38018196a1a5c2c225e223`: loss accounting and an explicit async timeout, not a delivery redesign. The [Python README](python/README.md) describes that delta; its environment-variable table is reconciled to explicit constructor configuration. Its examples and installation claims remain unexecuted/unvalidated. Use the [client](python/src/lokikit/client.py) and [handler](python/src/lokikit/handler.py) at the selected revision to resolve discrepancies.
 
 - Configuration is explicit: `LokiClient(endpoint=..., labels=..., batch_size=..., flush_interval=..., token=...)`; `LokiHandler` takes the same arguments plus `level`. The SDK does **not** automatically read `LOKI_ENDPOINT` or `LOKI_TOKEN`. Defaults include batch size `20` and interval `5.0`; relying on defaults does not select an approved receiver.
 - Construction starts a daemon timer. `push(line, extra_labels=None)`, `flush()` and `close()` are synchronous; threshold-triggered and manual flushing perform HTTP while holding the buffer lock. The timer is not a nonblocking guarantee for caller-triggered sends.

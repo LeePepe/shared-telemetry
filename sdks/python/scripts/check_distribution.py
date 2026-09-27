@@ -61,7 +61,15 @@ def check_resource_bytes(actual, expected):
         raise ValueError("PY_AI_ARTIFACT: distributed contract differs from validated source")
 
 
+def check_license_bytes(contents, expected):
+    if not contents:
+        raise ValueError("PY_LICENSE: distribution omits LICENSE")
+    if any(content != expected for content in contents):
+        raise ValueError("PY_LICENSE: distributed LICENSE differs from repository root LICENSE")
+
+
 def main():
+    license_bytes = (SDK.parents[1] / "LICENSE").read_bytes()
     with tempfile.TemporaryDirectory(prefix="lokikit-python-dist-") as directory:
         root = Path(directory)
         output = root / "dist"
@@ -74,9 +82,15 @@ def main():
                     for path in (SDK / "src/lokikit/ai").rglob("*")
                     if path.is_file() and path.suffix in {".md", ".json", ".py"}}
         with zipfile.ZipFile(wheels[0]) as archive:
+            check_license_bytes([archive.read(name) for name in archive.namelist()
+                                 if re.fullmatch(r"[^/]+\.dist-info/(?:licenses/)?LICENSE", name)],
+                                license_bytes)
             check_resource_bytes({name: archive.read(name) for name in archive.namelist()
                                   if name in expected}, expected)
         with tarfile.open(sdists[0]) as archive:
+            license_name = sdists[0].name.removesuffix(".tar.gz") + "/LICENSE"
+            check_license_bytes([archive.extractfile(member).read() for member in archive.getmembers()
+                                 if member.name == license_name and member.isfile()], license_bytes)
             members = {"/".join(member.name.split("/")[2:]): member
                        for member in archive.getmembers() if "/src/" in member.name and member.isfile()}
             check_resource_bytes({name: archive.extractfile(member).read()

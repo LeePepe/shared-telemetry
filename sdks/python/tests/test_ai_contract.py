@@ -67,3 +67,13 @@ def test_distribution_cannot_rewrite_validated_contract():
     with pytest.raises(ValueError, match="PY_AI_ARTIFACT"):
         CHECK.check_resource_bytes({"lokikit/ai/README.md": b"changed"},
                                    {"lokikit/ai/README.md": b"contract"})
+
+
+def test_distribution_license_matches():
+    CHECK.check_license_bytes([b"license"], b"license")
+
+
+@pytest.mark.parametrize("contents", [[], [b"changed"], [b"license", b"changed"]])
+def test_missing_or_changed_distribution_license_fails(contents):
+    with pytest.raises(ValueError, match="PY_LICENSE:"):
+        CHECK.check_license_bytes(contents, b"license")
