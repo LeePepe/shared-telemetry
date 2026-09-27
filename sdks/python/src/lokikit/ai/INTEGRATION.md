@@ -1,6 +1,6 @@
 # Install, wire, verify, remove
 
-For candidate validation, build from a reviewed immutable repository revision:
+Build from tag `v0.1.0` (or a reviewed immutable revision):
 
 ```sh
 python -m build sdks/python
@@ -8,8 +8,8 @@ python -m pip install <exact-local-wheel-file>
 ```
 
 Use a fresh virtual environment and record the revision, wheel SHA-256 and
-resolved dependencies. The version string alone cannot distinguish unpublished
-0.1.0 candidates. Publication to PyPI is not part of these commands.
+resolved dependencies. The version string alone cannot distinguish locally
+built 0.1.0 wheels. Publication to PyPI is not part of these commands.
 
 Discover `ai/README.md` with `importlib.resources` as described in the entry.
 The [synthetic example](EXAMPLES.md) demonstrates actual public import, client

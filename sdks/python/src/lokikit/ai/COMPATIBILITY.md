@@ -9,9 +9,8 @@
 | Auth | Optional explicit Bearer token | Loopback success/rejection fixture; receiver-specific production authentication unverified |
 | AI resources | `lokikit/ai` within wheel and sdist | `importlib.resources`, registry/package version equality and artifact inspection |
 
-The package metadata already declares MIT, but no repository-wide license file
-has been established. This candidate does not select or grant a new license;
-repository release/publication requires Owner resolution of that gap.
+Licensed under MIT (the `shared-telemetry` repository root `LICENSE` file; the
+package metadata also declares MIT).
 
 The existing Python test suite covers sync/async local loss accounting, timers
 and logging paths with test doubles. The packaged fixture covers the synchronous
@@ -20,6 +19,6 @@ installed-package journey, schema/input rejection and redaction are not proved
 by those checks. Four-metric coverage, full G2 scanning and D1 failure/concurrency
 isolation remain unmeasured. No complete 6DQ pass is claimed.
 
-No prior package release or deprecation period is established. Future breaking
-changes require an explicit migration and consumer upgrade; no compatibility
-with an untested old client is inferred.
+0.1.0 is the first release, so no earlier deprecation period exists. Future
+breaking changes require an explicit migration and consumer upgrade; no
+compatibility with an untested old client is inferred.
