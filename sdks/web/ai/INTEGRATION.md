@@ -1,10 +1,10 @@
 # Integration
 
-Build a reviewed immutable source revision, then run `npm pack` in `sdks/web`.
-Install that exact tarball in a separate consumer and retain the lockfile
-integrity plus source SHA. Do not treat the shared `0.1.0` candidate version
-string as sufficient to distinguish different unpublished tarballs. This
-package stays `private: true`; no npm-registry publication is authorized.
+Build from tag `v0.1.0` (or a reviewed immutable revision), then run `npm pack`
+in `sdks/web`. Install that exact tarball in a separate consumer and retain the
+lockfile integrity plus source SHA. The `0.1.0` version string alone does not
+distinguish different locally packed tarballs. This package stays
+`private: true`; no npm-registry publication is authorized.
 
 The [executable fixture](EXAMPLES.md) imports the installed ESM API and type
 checks its public declarations. A separate smoke check covers CommonJS exports.

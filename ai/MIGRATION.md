@@ -22,6 +22,6 @@ does not retract transmitted data. File conversion/deletion, retention, cloud
 cutover and backend restore require separate authority. The provider fixture
 does not prove any product's old→new→old rollback.
 
-After the approved first release, switch the candidate SHA to exact 0.1.0,
-confirm its resolved commit and rerun version-mode external/consumer checks.
+Switch a candidate SHA pin to exact 0.1.0 (tag `v0.1.0`), confirm its resolved
+commit and rerun version-mode external/consumer checks.
 Do not overwrite or delete an immutable release to repair consumers.

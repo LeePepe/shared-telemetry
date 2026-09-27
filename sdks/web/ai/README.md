@@ -1,7 +1,8 @@
 # Loki Web consumer contract
 
-Package `@leepepe/loki-web`, candidate **0.1.0**, ESM and CommonJS with TypeScript
-declarations. This private package is not published to npm by this change.
+Package `@leepepe/loki-web`, released **0.1.0** (Git tag `v0.1.0`).
+ESM and CommonJS with TypeScript declarations. This private package is
+not published to npm by this change.
 
 | Task | Read |
 | --- | --- |

@@ -1,10 +1,9 @@
 # Swift integration
 
-Use the canonical repository URL and one root SwiftPM dependency. While there
-is no release, pin a reviewed full commit SHA. The [consumer fixture](EXAMPLES.md)
-provides a complete manifest. After an approved first tag, use
-`.package(url: "https://github.com/LeePepe/shared-telemetry.git", exact: "0.1.0")`;
-that is a future release instruction, not a published-version claim.
+Use the canonical repository URL and one root SwiftPM dependency:
+`.package(url: "https://github.com/LeePepe/shared-telemetry.git", exact: "0.1.0")`
+(tag `v0.1.0`). The [consumer fixture](EXAMPLES.md) shows a complete manifest;
+it pins a full revision.
 
 The public product/module remains `LokiKit`. Platforms are iOS 26 and macOS 26,
 Swift tools 6.2. Commit consumer `Package.resolved` according to its policy;

@@ -1,8 +1,8 @@
 # Migration and rollback
 
 Initial path: source/local-path `@leepepe/loki-web` 0.1.0 → an immutable packed
-artifact from an approved revision. This provider slice changes packaging/docs
-only, not runtime behavior or consumer dependencies.
+artifact from the `v0.1.0` tag (or an approved immutable revision). This provider
+slice changes packaging/docs only, not runtime behavior or consumer dependencies.
 
 1. Record the old source SHA, lockfile, labels, approved event fields, lifecycle
    wiring and storage mode. Do not capture secret values or real queued content.

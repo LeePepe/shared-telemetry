@@ -1,6 +1,6 @@
 # shared-telemetry Swift consumer contract
 
-Release unit **LokiKit / SwiftPM**, candidate **0.1.0** (unreleased).
+Release unit **LokiKit / SwiftPM**, released **0.1.0** (Git tag `v0.1.0`).
 Read this contract from the exact resolved `shared-telemetry` checkout, not
 floating `main`. Repository/module renaming is not an API migration.
 
