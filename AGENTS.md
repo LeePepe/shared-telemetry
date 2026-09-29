@@ -30,8 +30,8 @@ contract change must land in every SDK at once (say so in Intent).
 
 ## Protocol
 
-Follow `LeePepe/shared-ci@761fe6b0b3ca5e2c57d244182d495ab8041851fa/ai/agent-protocol.md`
-(https://github.com/LeePepe/shared-ci/blob/761fe6b0b3ca5e2c57d244182d495ab8041851fa/ai/agent-protocol.md).
+Follow `LeePepe/shared-ci@6e354f476bc53d68f0f09fc231d5cd938466af9c/ai/agent-protocol.md`
+(https://github.com/LeePepe/shared-ci/blob/6e354f476bc53d68f0f09fc231d5cd938466af9c/ai/agent-protocol.md).
 It must be the same SHA as the `uses:` pins in `.github/workflows/`.
 
 ## Verify
@@ -51,15 +51,15 @@ scripts/verify --layer WebSDK         # one layer (CI lanes call it this way)
 
 ## Required checks
 
-Merging to `main` requires (must match the ruleset):
+Merging to `main` requires (must match the ruleset after rollout):
 
 - `quality / aggregate`
+- `codex-review-gate`
 
 The live ruleset `main protection` currently enforces PR-only merges, no
 deletion and no force-push; adding `quality / aggregate` as a required status
-check is an Owner ruleset change. There is no AI review check:
-`codex-review-target / codex-review` needs a self-hosted runner, which this
-repository does not have (see Red lines).
+check is an Owner ruleset change. `codex-review-gate` becomes ruleset-required
+after positive/negative probe acceptance, as a separate Owner ruleset step.
 
 ## Red lines
 
@@ -82,14 +82,11 @@ repository does not have (see Red lines).
 
 Approved exceptions:
 
-- No `codex-review-target / codex-review` check (no self-hosted runner); the
-  shared-ci ruleset template's review requirement is not applied here. Owner-
-  approved for the S7 rollout.
 - The Stack layer has no automated gate (needs Docker); verify manually.
 
 ## Dependencies
 
-- `shared-ci` `761fe6b0b3ca5e2c57d244182d495ab8041851fa` — https://github.com/LeePepe/shared-ci/blob/761fe6b0b3ca5e2c57d244182d495ab8041851fa/ai/
+- `shared-ci` `6e354f476bc53d68f0f09fc231d5cd938466af9c` — https://github.com/LeePepe/shared-ci/blob/6e354f476bc53d68f0f09fc231d5cd938466af9c/ai/
 - No other shared library. External: TelemetryDeck SwiftSDK (SwiftSDK), aiohttp
   (PythonSDK), requests + PyYAML (ProjectAnalyzer).
 
