@@ -1,0 +1,55 @@
+name: review
+
+# AI review for this repository's PRs.
+# pull_request_target evaluates this file from main, so it takes effect after merge.
+# Codex review runs on this repository's own self-hosted runner, whose service
+# environment selects the review provider (no launcher script). The review caller
+# runs when the repository variable SHARED_CI_REVIEW_RUNNER is 'true'; otherwise
+# it skips rather than queues forever. The hosted Codex completion gate fails
+# closed on that skip. Requiring the new check is a separate Owner ruleset step
+# after positive/negative probe acceptance, with approved settings and live readback.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  codex-review-target:
+    if: vars.SHARED_CI_REVIEW_RUNNER == 'true'
+    uses: LeePepe/shared-ci/.github/workflows/codex-review.yml@6e354f476bc53d68f0f09fc231d5cd938466af9c
+    with:
+      codex-bin: /opt/homebrew/bin/codex
+      rules-file: AGENTS.md
+      owner-user-id: "13819054"
+
+  codex-review-gate:
+    if: ${{ always() }}
+    needs: [codex-review-target]
+    runs-on: ubuntu-latest
+    permissions: {}
+    timeout-minutes: 2
+    steps:
+      - name: Require completed Codex review
+        shell: sh
+        env:
+          CODEX_RESULT: ${{ needs.codex-review-target.result }}
+        run: |
+          case "${CODEX_RESULT:-}" in
+            success)
+              echo "Codex review completed successfully."
+              ;;
+            *)
+              echo "::error::Codex review must complete with success; skipped, failed, cancelled or unavailable review cannot pass."
+              echo "Check SHARED_CI_REVIEW_RUNNER and trusted runner availability, inspect the Codex review job, then re-run review for this PR head."
+              echo "Owner approval and Kimi success do not substitute for completed Codex review."
+              exit 1
+              ;;
+          esac
