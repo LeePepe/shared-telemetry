@@ -142,14 +142,14 @@ jobs:
 
 ### macOS `launchd`
 
-Save as `~/Library/LaunchAgents/com.leepepe.loki-project-analyzer.plist`:
+Save as `~/Library/LaunchAgents/com.example.loki-project-analyzer.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>Label</key><string>com.leepepe.loki-project-analyzer</string>
+    <key>Label</key><string>com.example.loki-project-analyzer</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/env</string>
@@ -172,8 +172,8 @@ Save as `~/Library/LaunchAgents/com.leepepe.loki-project-analyzer.plist`:
 Load it:
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.leepepe.loki-project-analyzer.plist
-launchctl start com.leepepe.loki-project-analyzer
+launchctl load ~/Library/LaunchAgents/com.example.loki-project-analyzer.plist
+launchctl start com.example.loki-project-analyzer
 ```
 
 ## Design notes
