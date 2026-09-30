@@ -62,6 +62,19 @@ EXIT_RUNTIME_ERR = 4
 log = logging.getLogger("project-analyzer")
 
 
+def _resolve_config_path(config_path: str | None) -> Path:
+    if config_path is not None:
+        return Path(config_path)
+    env_config = os.environ.get("PROJECT_ANALYZER_CONFIG")
+    if env_config:
+        return Path(env_config)
+    if DEFAULT_CONFIG.exists():
+        return DEFAULT_CONFIG
+    example = DEFAULT_CONFIG.with_name("config.example.yaml")
+    log.warning("Using example config: %s; configure your real project list before use.", example)
+    return example
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="project-analyzer",
@@ -73,8 +86,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--project", help="Run only this project (by name). Default: all.")
     p.add_argument(
         "--config",
-        default=str(DEFAULT_CONFIG),
-        help=f"Path to config.yaml (default: {DEFAULT_CONFIG}).",
+        help=(
+            "Config path (overrides PROJECT_ANALYZER_CONFIG). Default: "
+            "PROJECT_ANALYZER_CONFIG, then config.yaml beside this script, "
+            "then config.example.yaml with a warning."
+        ),
     )
     p.add_argument(
         "--loki-url",
@@ -289,7 +305,7 @@ def run(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     _configure_logging(args.verbose)
     try:
-        cfg = load_config(args.config)
+        cfg = load_config(_resolve_config_path(args.config))
         cfg = _apply_cli_overrides(cfg, args.loki_url)
         projects = filter_projects(cfg, args.project)
     except ConfigError as e:

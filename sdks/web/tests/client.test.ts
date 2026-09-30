@@ -87,14 +87,14 @@ describe('LokiTelemetry', () => {
       batchSize: 1,
       storage: 'memory'
     });
-    t.log('info', 'app.started', { user: 'tianpli' });
+    t.log('info', 'app.started', { user: 'test-user' });
     await vi.runAllTimersAsync();
     await Promise.resolve();
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
     expect(body.streams[0].stream).toEqual({ app: 'X', level: 'info' });
     const line = JSON.parse(body.streams[0].values[0][1]);
     expect(line.message).toBe('app.started');
-    expect(line.user).toBe('tianpli');
+    expect(line.user).toBe('test-user');
     t.shutdown();
   });
 

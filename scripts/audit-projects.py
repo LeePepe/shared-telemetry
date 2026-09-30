@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Scan ~/Development/*/ to check which projects have LokiKit integrated.
+"""Scan the development root to check which projects have LokiKit integrated.
+
+Set DEV_DIR to override the default Development directory under the user's home.
 
 Looks for:
   - lokikit / loki-web imports in source files
@@ -12,7 +14,7 @@ import os
 import re
 from pathlib import Path
 
-DEV_DIR = Path.home() / "Development"
+DEV_DIR = Path(os.environ.get("DEV_DIR") or Path.home() / "Development")
 LOKIKIT_DASHBOARDS = DEV_DIR / "LokiKit" / "stack" / "grafana" / "dashboards"
 
 # Patterns that indicate LokiKit integration
