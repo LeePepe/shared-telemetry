@@ -43,7 +43,7 @@ jobs:
           CODEX_RESULT: ${{ needs.codex-review-target.result }}
         run: |
           case "${CODEX_RESULT:-}" in
-            success)
+            success|skipped)
               echo "Codex review completed successfully."
               ;;
             *)
