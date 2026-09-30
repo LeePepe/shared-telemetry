@@ -1,6 +1,6 @@
 """Vendored thin copy of the shared DashboardReporter pattern.
 
-Adapted from ~/Development/agent-ops-dashboard/agents/common/dashboard_reporter.py.
+Adapted from the agent-ops-dashboard project's agents/common/dashboard_reporter.py.
 Best-effort: all network calls are logged but never raised, so the analyzer
 keeps working even if the dashboard is down.
 

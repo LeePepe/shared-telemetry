@@ -10,6 +10,9 @@ node_modules/
 dist/
 __pycache__/
 
+# Local analyzer project list
+agents/project-analyzer/config.yaml
+
 # shared-ci resolver cache and local toolchain (scripts/verify, scripts/ci/setup.sh)
 .shared-ci/
 .venv/

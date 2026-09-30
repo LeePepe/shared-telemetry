@@ -1,4 +1,5 @@
 # project-analyzer configuration
+# Copy to config.yaml (gitignored) or point PROJECT_ANALYZER_CONFIG at your real config.
 #
 # Loki URL precedence (highest first):
 #   1. --loki-url CLI flag
@@ -40,34 +41,18 @@ thresholds:
   silent_failure_min_baseline: 20
 
 projects:
-  - name: agent-ops-dashboard
-    repo_path: "~/Development/agent-ops-dashboard"
-    team_lead: "agent-ops team"
-    loki_app_label: "agent-ops-dashboard"
+  - name: example-web
+    repo_path: "/path/to/example-web"
+    team_lead: "example team"
+    loki_app_label: "example-web"
     selectors:
-      user_action: '{app="agent-ops-dashboard", stream="user_action"}'
-      performance: '{app="agent-ops-dashboard", stream="performance"}'
+      user_action: '{app="example-web", stream="user_action"}'
+      performance: '{app="example-web", stream="performance"}'
 
-  - name: Financial
-    repo_path: "~/Development/Financial"
-    team_lead: "Financial team"
-    loki_app_label: "financial"
+  - name: example-ios
+    repo_path: "/path/to/example-ios"
+    team_lead: "example team"
+    loki_app_label: "example-ios"
     selectors:
-      user_action: '{app="Financial", stream="user_action"}'
-      performance: '{app="Financial", stream="performance"}'
-
-  - name: MonitorSelf
-    repo_path: "~/Development/MonitorSelf"
-    team_lead: "MonitorSelf team"
-    loki_app_label: "monitorself"
-    selectors:
-      user_action: '{app="MonitorSelf", stream="user_action"}'
-      performance: '{app="MonitorSelf", stream="performance"}'
-
-  - name: soe
-    repo_path: "~/Development/soe"
-    team_lead: "soe team"
-    loki_app_label: "soe"
-    selectors:
-      user_action: '{app="soe", stream="user_action"}'
-      performance: '{app="soe", stream="performance"}'
+      user_action: '{app="example-ios", stream="user_action"}'
+      performance: '{app="example-ios", stream="performance"}'

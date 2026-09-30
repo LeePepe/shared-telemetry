@@ -10,6 +10,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,10 +21,12 @@ from lib.analyzer import summarize_actions, summarize_performance  # noqa: E402
 from lib.config import load_config  # noqa: E402
 from lib.loki_client import LokiClient, LogEntry, QueryResult  # noqa: E402
 from lib.report import format_remediation_brief, format_report  # noqa: E402
-from run import _analyze_project, build_arg_parser, write_report_files  # noqa: E402
+from run import (  # noqa: E402
+    _analyze_project, _resolve_config_path, build_arg_parser, write_report_files,
+)
 
 
-CONFIG_PATH = ROOT / "config.yaml"
+CONFIG_PATH = ROOT / "config.example.yaml"
 
 
 def _fake_loki_payload(lines):
@@ -48,7 +51,7 @@ class ConfigTests(unittest.TestCase):
         names = [p.name for p in cfg.projects]
         self.assertEqual(
             set(names),
-            {"agent-ops-dashboard", "Financial", "MonitorSelf", "soe"},
+            {"example-web", "example-ios"},
         )
         self.assertTrue(cfg.loki.url.startswith("http"))
         self.assertGreater(cfg.loki.query_limit, 0)
@@ -57,6 +60,31 @@ class ConfigTests(unittest.TestCase):
         with patch.dict("os.environ", {"LOKI_URL": "http://loki.example:3100"}):
             cfg = load_config(CONFIG_PATH)
         self.assertEqual(cfg.loki.url, "http://loki.example:3100")
+
+    def test_config_path_precedence(self):
+        with TemporaryDirectory() as tmp:
+            local = Path(tmp) / "config.yaml"
+            local.touch()
+            env_config = Path(tmp) / "custom.yaml"
+            with patch("run.DEFAULT_CONFIG", local), patch.dict(
+                "os.environ", {"PROJECT_ANALYZER_CONFIG": str(env_config)}, clear=True
+            ):
+                parser = build_arg_parser()
+                self.assertEqual(_resolve_config_path(parser.parse_args([]).config), env_config)
+                args = parser.parse_args(["--config", str(CONFIG_PATH)])
+                self.assertEqual(_resolve_config_path(args.config), CONFIG_PATH)
+            with patch("run.DEFAULT_CONFIG", local), patch.dict("os.environ", {}, clear=True):
+                self.assertEqual(_resolve_config_path(None), local)
+
+    def test_config_path_falls_back_to_example(self):
+        with TemporaryDirectory() as tmp:
+            local = Path(tmp) / "config.yaml"
+            example = Path(tmp) / "config.example.yaml"
+            example.touch()
+            with patch("run.DEFAULT_CONFIG", local), patch.dict("os.environ", {}, clear=True):
+                with self.assertLogs("project-analyzer", level="WARNING") as captured:
+                    self.assertEqual(_resolve_config_path(None), example)
+                self.assertIn("example config", captured.output[0])
 
 
 class AnalyzerTests(unittest.TestCase):
@@ -226,7 +254,9 @@ class DailyJsonSchemaTests(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             from run import run as run_main
-            rc = run_main(["--daily", "--dry-run", "--output-dir", tmp])
+            rc = run_main([
+                "--config", str(CONFIG_PATH), "--daily", "--dry-run", "--output-dir", tmp,
+            ])
             self.assertEqual(rc, 0)
             # Check that at least one .daily.json was created
             json_files = list(Path(tmp).rglob("*.daily.json"))

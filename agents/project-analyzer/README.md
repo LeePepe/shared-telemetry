@@ -1,7 +1,7 @@
 # project-analyzer
 
 A per-project telemetry analyzer for this Loki stack. For every configured project
-(currently `agent-ops-dashboard`, `Financial`, `MonitorSelf`, `soe`) it queries Loki
+(see `example-web` and `example-ios` in the example config) it queries Loki
 for recent `user_action` and `performance` streams, detects common issues, and writes
 a markdown report plus (when issues are found) a remediation brief intended to be
 handed to that repo's team-lead.
@@ -15,7 +15,8 @@ handed to that repo's team-lead.
 | `silent_failure`  | Recent action volume ≤ `silent_failure_ratio` × baseline (when baseline ≥ min). |
 | `anomaly`         | No telemetry in either recent or baseline window.                                |
 
-All thresholds live in [`config.yaml`](./config.yaml); tune per your signal/noise.
+Default thresholds live in [`config.example.yaml`](./config.example.yaml); tune your
+local config per your signal/noise.
 
 ## Install
 
@@ -24,6 +25,17 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -r agents/project-analyzer/requirements.txt
 ```
 
+## Configuration / migration
+
+The real project list has moved out of the repo. Copy
+`agents/project-analyzer/config.example.yaml` to
+`agents/project-analyzer/config.yaml` (gitignored) and replace the placeholder projects,
+or set `PROJECT_ANALYZER_CONFIG` to your real config path.
+
+`--config` takes precedence over `PROJECT_ANALYZER_CONFIG`. Without either, the
+analyzer uses `config.yaml` beside the script if present; otherwise it uses
+`config.example.yaml` and logs a warning.
+
 ## Usage
 
 ```bash
@@ -31,7 +43,7 @@ pip install -r agents/project-analyzer/requirements.txt
 python3 agents/project-analyzer/run.py
 
 # A single project
-python3 agents/project-analyzer/run.py --project Financial
+python3 agents/project-analyzer/run.py --project example-web
 
 # Override Loki URL at the CLI
 python3 agents/project-analyzer/run.py --loki-url http://loki.local:3100
@@ -68,7 +80,7 @@ continues. State (agent_id, api_key) is persisted at
 ## Scheduling via Hermes cron
 
     @cronjob create schedule="0 8 * * *" name="lokikit-daily-analyzer" \
-      prompt="Run: cd ~/Development/LokiKit && python3 agents/project-analyzer/run.py --daily -v"
+      prompt="Run: cd /path/to/shared-telemetry && python3 agents/project-analyzer/run.py --daily -v"
 
 ## See all flags
 
@@ -80,6 +92,7 @@ python3 agents/project-analyzer/run.py --help
 
 | Variable     | Purpose                                          |
 |--------------|--------------------------------------------------|
+| `PROJECT_ANALYZER_CONFIG` | Config path when `--config` is not supplied. |
 | `LOKI_URL`   | Overrides `loki.url` in config. Never committed. |
 | `LOKI_TOKEN` | Optional bearer token for Loki (never committed).|
 
@@ -123,7 +136,7 @@ rendering via the `--dry-run` code path.
 jobs:
   - name: loki-project-analyzer
     schedule: "*/30 * * * *"   # every 30 minutes
-    command: /usr/bin/env bash -lc 'cd ~/Development/LokiKit && LOKI_URL=http://localhost:3100 python3 agents/project-analyzer/run.py'
+    command: /usr/bin/env bash -lc 'cd /path/to/shared-telemetry && LOKI_URL=http://localhost:3100 python3 agents/project-analyzer/run.py'
     log: ~/Library/Logs/loki-project-analyzer.log
 ```
 
@@ -142,7 +155,7 @@ Save as `~/Library/LaunchAgents/com.leepepe.loki-project-analyzer.plist`:
         <string>/usr/bin/env</string>
         <string>bash</string>
         <string>-lc</string>
-        <string>cd ~/Development/LokiKit &amp;&amp; python3 agents/project-analyzer/run.py</string>
+        <string>cd /path/to/shared-telemetry &amp;&amp; python3 agents/project-analyzer/run.py</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>

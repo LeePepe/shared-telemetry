@@ -26,15 +26,13 @@ Trigger this skill when:
 ## 2. Prerequisites
 
 - Docker Desktop running.
-- The monorepo checked out locally. Default path:
-  `~/Development/LokiKit`. Agents MAY override with
-  `LOKI_STACK_DIR`.
+- The monorepo checked out locally; set `LOKI_STACK_DIR` to your checkout path.
 - Ports `3100` (Loki) and `3010` (Grafana) available, or customize
   via `stack/.env`.
 
 ## 3. Start the stack
 
-    cd "${LOKI_STACK_DIR:-$HOME/Development/LokiKit}/stack"
+    cd "${LOKI_STACK_DIR:?set LOKI_STACK_DIR to your shared-telemetry checkout}/stack"
     cp -n .env.example .env            # first run only
     docker compose up -d
 
@@ -151,7 +149,7 @@ Example init labels:
 
 4. Reload:
 
-       cd "${LOKI_STACK_DIR:-$HOME/Development/LokiKit}/stack"
+       cd "${LOKI_STACK_DIR:?set LOKI_STACK_DIR to your shared-telemetry checkout}/stack"
        docker compose restart grafana
        # (Grafana also rescans the folder every 30s.)
 
