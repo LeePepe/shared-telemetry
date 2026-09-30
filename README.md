@@ -1,6 +1,6 @@
 # shared-telemetry
 
-Shared telemetry SDKs and existing Loki/Grafana deployment assets. The canonical repository is [LeePepe/shared-telemetry](https://github.com/LeePepe/shared-telemetry) (repository ID `1213460359`), formerly LokiKit. The repository rename preserves the Swift `LokiKit`, Web `@leepepe/loki-web`, and Python `lokikit` package/import names; it is not an API migration or a release.
+Shared telemetry SDKs and the existing Loki/Grafana deployment assets. The canonical repository is [LeePepe/shared-telemetry](https://github.com/LeePepe/shared-telemetry) (repository ID `1213460359`), formerly LokiKit. The repository rename preserves the Swift `LokiKit`, Web `@leepepe/loki-web`, and Python `lokikit` package/import names; it is not an API migration or a release.
 
 ## Find the right document
 
