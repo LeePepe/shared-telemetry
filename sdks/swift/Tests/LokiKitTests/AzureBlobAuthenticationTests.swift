@@ -4,6 +4,8 @@ import XCTest
 @testable import LokiKit
 
 final class AzureBlobAuthenticationTests: XCTestCase {
+    private let privacy = AzureBlobPrivacyPolicy(events: ["synthetic.auth": [:], "synthetic.isolation": [:], "synthetic.cancelled": [:]],
+        apps: ["synthetic"], builds: ["auth-test", "isolation-test", "cancellation-test"])
     func testConnectionLevelChallengesCannotUseForeignSessionCredentials() async throws {
         for method in [NSURLAuthenticationMethodNTLM, NSURLAuthenticationMethodNegotiate,
                        NSURLAuthenticationMethodClientCertificate] {
@@ -42,7 +44,7 @@ final class AzureBlobAuthenticationTests: XCTestCase {
         let queue = TelemetryQueue(storeDirectory: directory)
         queue.enqueue(TelemetryEvent(name: "synthetic.isolation"))
         let transport = try AzureBlobTransport(containerURL: fixture.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
-            app: "synthetic", build: "isolation-test", installID: UUID(), configuration: configuration)
+            app: "synthetic", build: "isolation-test", installID: UUID(), privacy: privacy, configuration: configuration)
         // Mutating a caller's configuration after construction cannot change the seam.
         configuration.protocolClasses = []
         configuration.httpAdditionalHeaders = ["X-Later-Caller-Header": "synthetic-only"]
@@ -115,7 +117,7 @@ final class AzureBlobAuthenticationTests: XCTestCase {
         let queue = TelemetryQueue(storeDirectory: directory)
         queue.enqueue(TelemetryEvent(name: "synthetic.cancelled"))
         let transport = try AzureBlobTransport(containerURL: fixture.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
-            app: "synthetic", build: "cancellation-test", installID: UUID(), configuration: fixture.session.configuration)
+            app: "synthetic", build: "cancellation-test", installID: UUID(), privacy: privacy, configuration: fixture.session.configuration)
         let entered = expectation(description: "mock request started")
         let stopped = expectation(description: "mock request cancelled")
         fixture.state.withLock { $0.holdOpen = true; $0.onRequest = { entered.fulfill() }; $0.onStop = { stopped.fulfill() } }
@@ -142,7 +144,7 @@ final class AzureBlobAuthenticationTests: XCTestCase {
         let queue = TelemetryQueue(storeDirectory: directory)
         queue.enqueue(TelemetryEvent(name: "synthetic.auth"))
         let transport = try AzureBlobTransport(containerURL: fixture.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
-            app: "synthetic", build: "auth-test", installID: UUID(), configuration: fixture.session.configuration)
+            app: "synthetic", build: "auth-test", installID: UUID(), privacy: privacy, configuration: fixture.session.configuration)
         do { try await transport.flush(queue); XCTFail("Authentication challenge is not delivery") }
         catch { XCTAssertEqual(error as? AzureBlobError, .networkFailure) }
         let state = fixture.state.withLock { $0 }

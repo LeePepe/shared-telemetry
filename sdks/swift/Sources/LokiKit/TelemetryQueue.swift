@@ -69,11 +69,13 @@ final class TelemetryQueue: Sendable {
     func endFlush() { state.withLock { $0.flushing = false } }
 
     /// A snapshot, never a destructive take. Enqueues during transport belong to a later flush.
-    func batchesForFlush() throws -> [Batch] {
+    func batchesForFlush(retryingWrites: Bool = true) throws -> [Batch] {
         state.withLock { value in
             // Freeze file contents before transport; concurrent tracks start a new batch.
             value.activeID = nil
-            for batch in value.pending where value.dirty.contains(batch.id) {
+            // Blob takes a read-only snapshot so privacy validation precedes retries.
+            // Existing Loki callers retain the default persistence contract.
+            for batch in value.pending where retryingWrites && value.dirty.contains(batch.id) {
                 do {
                     try writeBatch(id: batch.id, events: batch.events)
                     value.dirty.remove(batch.id)

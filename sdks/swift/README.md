@@ -69,13 +69,53 @@ The shipper sets a ten-second request timeout and accepts HTTP 2xx. It groups st
 
 `AzureBlobTransport` is **internal**, not a new public `TelemetryService` or a
 released consumer entry point. Loki APIs, defaults and wire bytes are unchanged.
-Public Blob wiring remains dependent on separately reviewed event privacy,
-configuration and observability work. Generic `TelemetryEvent.properties` do
-**not** inherit `LokiLogSink` filtering; this core must not be exposed as an
-unfiltered public data-export path. No consumer rollout is established here.
+Public Blob wiring remains dependent on separately reviewed privacy adoption,
+configuration and observability work. This internal core enforces its own
+default-deny policy; generic `TelemetryEvent.properties` do **not** inherit
+`LokiLogSink` filtering. No consumer rollout is established here.
+
+`AzureBlobPrivacyPolicy` is an instance-owned validator, not a global registry.
+The caller supplies reviewed, code-configured exact event names and per-event
+field constraints: `finiteNumber` accepts a complete finite JSON-number string,
+and `label` accepts only membership in the configured closed set. There is no
+arbitrary-string rule, wildcard name/key or automatic field removal. Unregistered
+names/keys, unsafe values under registered keys and non-finite numbers reject the
+whole batch with the fixed, content-free `privacyRejected` error. With no policy,
+no batch can be exported. Valid accepted values are not normalized or rewritten.
+
+The same policy explicitly lists approved app/build path labels, including any
+historical values that may be replayed. Policy names/keys/labels must never be
+derived from incoming event content. App/build and install UUID must come from
+reviewed product code/configuration and an approved non-personal install-identity
+lifecycle. Syntax, finite numbers or UUID shape cannot prove provenance: an account
+UUID, sensitive numeric measurement or user-derived label does not become safe by
+passing a parser. No general event-identifier rule or product vocabulary is added.
+
+Blob obtains a non-writing queue snapshot, validates all events in each batch
+before encoding or transport persistence, and only then attempts durable writes.
+On restart it revalidates source events and stored path against the current policy.
+It also decompresses the entire saved gzip stream and requires byte equality with
+the currently approved canonical NDJSON; source digest alone is not privacy
+approval. Extra JSON fields, optional gzip header metadata, trailing data,
+concatenated gzip members or stricter-policy
+mismatches block export without changing the journal, assigning a new upload ID,
+acknowledging delivery, deleting or migrating any records. Valid legacy compressed
+bytes are sent unchanged, not recompressed. As with other failures, a rejected
+batch stops that flush and can block later safe backlog until its policy or data
+disposition is explicitly resolved; this is not automatic recovery or disposal.
+
+This is an export/journal guard, **not** a privacy guarantee for the generic queue.
+Legacy `TelemetryQueue` and public Loki/TelemetryDeck admission/default behavior
+are unchanged: unsafe content they already accepted can remain in memory or raw
+JSON files. This core neither admits new events nor erases those files. A rejected
+dirty suffix remains in memory without a Blob-triggered rewrite; process exit can
+still lose a previously failed generic enqueue, as documented above. Public
+ingress protection, compatible adoption/migration and disposal of unsafe retained
+records remain separate work. Rolling back to an older exporter can remove this
+guard and expose old content; a readable queue format does not imply safe rollback.
 
 The core takes an explicit HTTPS container URL, create-only container service SAS
-query and app/build/install ID. It reads no environment,
+query, app/build/install ID and the explicit privacy policy. It reads no environment,
 plist, Keychain or build secrets. Stored-policy SAS (`si`, without `sp`) is supported;
 explicit `sp`, when present, must be `c`. The caller owns the policy's actual
 permissions and consent. The transport creates its own ephemeral `URLSession` for

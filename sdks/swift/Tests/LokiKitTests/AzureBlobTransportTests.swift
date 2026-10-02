@@ -19,10 +19,267 @@ final class AzureBlobTransportTests: XCTestCase {
         try FileManager.default.removeItem(at: directory)
     }
 
-    private func transport(build: String = "test build+1", now: Date = Date(timeIntervalSince1970: 1_700_000_000)) throws -> AzureBlobTransport {
+    private func transport(build: String = "test build+1", now: Date = Date(timeIntervalSince1970: 1_700_000_000),
+                           privacy: AzureBlobPrivacyPolicy = fixturePrivacy) throws -> AzureBlobTransport {
         try AzureBlobTransport(containerURL: http.container, sasQuery: "sv=2023-11-03&sr=c&si=synthetic&sig=fake%2Bonly%2F%3D",
             app: "sample", build: build, installID: UUID(uuidString: "00000000-0000-4000-8000-000000000001")!,
-            configuration: http.session.configuration, now: { now })
+            privacy: privacy, configuration: http.session.configuration, now: { now })
+    }
+
+    // Fixed synthetic code catalogue, never inferred from queued/request data.
+    private static var fixturePrivacy: AzureBlobPrivacyPolicy {
+        let names = ["synthetic.\"second\n", "synthetic.collision", "synthetic.server-error", "synthetic.errors",
+            "synthetic.destination", "synthetic.prefix", "synthetic.suffix", "synthetic.in-flight", "synthetic.later",
+            "synthetic.remove", "synthetic.original", "synthetic.different", "synthetic.redirect", "synthetic.marker",
+            "synthetic.checksum", "synthetic.history", "synthetic.process"] + (0..<65).map { "synthetic.\($0)" }
+        var events = Dictionary(uniqueKeysWithValues: names.map { ($0, [String: AzureBlobPrivacyPolicy.ValueRule]()) })
+        events["synthetic.first"] = ["count": .finiteNumber]
+        events["synthetic.retry"] = ["count": .finiteNumber]
+        events["synthetic.large"] = Dictionary(uniqueKeysWithValues: (0..<12_000).map { ("metric.\($0)", .finiteNumber) })
+        return AzureBlobPrivacyPolicy(events: events, apps: ["sample", "new-app"],
+            builds: ["test build+1", "next-build", "2", "路径 #+?%", "new-build", "before-kill", "after-kill"])
+    }
+
+    func testDefaultPolicyCannotExportCanaryInBodyOrCreateBlobJournal() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        let canary = "synthetic-transcript-CANARY\nnot-telemetry"
+        queue.enqueue(TelemetryEvent(name: canary, properties: ["error": canary]))
+        let id = try XCTUnwrap(queue.batchesForFlush().first?.id)
+        let sourceFile = directory.appendingPathComponent("\(id).json")
+        let sourceBefore = try Data(contentsOf: sourceFile)
+        let sender = try AzureBlobTransport(containerURL: http.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
+            app: "sample", build: "test build+1", installID: UUID(), configuration: http.session.configuration)
+        http.state.withLock { $0.error = URLError(.timedOut) }
+        do { try await sender.flush(queue); XCTFail("Default export must be rejected") }
+        catch { XCTAssertEqual(error as? AzureBlobError, .privacyRejected) }
+        // On the vulnerable baseline these assertions inspect the ACTUAL gzip sent
+        // through URLSession and the durable body, not only an encoder helper.
+        for request in http.requests {
+            XCTAssertFalse(String(decoding: try gunzip(requestBody(request)), as: UTF8.self).contains("CANARY"))
+        }
+        let journal = directory.appendingPathComponent("\(id).azure-blob")
+        if FileManager.default.fileExists(atPath: journal.path) {
+            let outer = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: journal)) as? [String: Any])
+            let payload = try XCTUnwrap(Data(base64Encoded: XCTUnwrap(outer["payload"] as? String)))
+            let record = try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+            let body = try XCTUnwrap(Data(base64Encoded: XCTUnwrap(record["body"] as? String)))
+            XCTAssertFalse(String(decoding: try gunzip(body), as: UTF8.self).contains("CANARY"))
+        }
+        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        XCTAssertEqual(try Data(contentsOf: sourceFile), sourceBefore)
+    }
+
+    private var privacyPolicy: AzureBlobPrivacyPolicy {
+        AzureBlobPrivacyPolicy(events: ["synthetic.safe": ["duration": .finiteNumber, "phase": .label(["done", "retry"])]],
+            apps: ["sample"], builds: ["test build+1"])
+    }
+
+    private func storedBytes() throws -> [String: Data] {
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        return try Dictionary(uniqueKeysWithValues: files.map { ($0.lastPathComponent, try Data(contentsOf: $0)) })
+    }
+
+    func testClosedLabelsAndFiniteMetricsSurviveWireAndJournalUnchanged() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        let values = ["0", "-0", "1.25", "-2", "1e3", "1E-3"]
+        let instant = Date(timeIntervalSince1970: 1_700_000_000)
+        for value in values {
+            queue.enqueue(TelemetryEvent(name: "synthetic.safe", properties: ["duration": value, "phase": "done"], timestamp: instant))
+        }
+        http.state.withLock { $0.error = URLError(.timedOut) }
+        do { try await transport(privacy: privacyPolicy).flush(queue); XCTFail("Unconfirmed") }
+        catch { XCTAssertEqual(error as? AzureBlobError, .networkFailure) }
+        let body = try requestBody(XCTUnwrap(http.requests.first))
+        let lines = try gunzip(body).split(separator: 0x0a)
+        let properties = try lines.map { try XCTUnwrap((JSONSerialization.jsonObject(with: Data($0)) as? [String: Any])?["properties"] as? [String: String]) }
+        XCTAssertEqual(properties, values.map { ["duration": $0, "phase": "done"] })
+        let id = try XCTUnwrap(queue.batchesForFlush().first?.id)
+        let journal = try XCTUnwrap(AzureBlobBatch.load(id: id, queue: queue))
+        XCTAssertEqual(journal.body, body)
+        XCTAssertFalse(String(decoding: try gunzip(journal.body), as: UTF8.self).contains("CANARY"))
+        http.state.withLock { $0.error = nil; $0.status = 403; $0.headers = ["x-ms-error-code": "UnauthorizedBlobOverwrite"] }
+        try await transport(privacy: privacyPolicy).flush(TelemetryQueue(storeDirectory: directory))
+        XCTAssertEqual(try requestBody(XCTUnwrap(http.requests.last)), body)
+        XCTAssertEqual(http.requests.first?.url, http.requests.last?.url)
+        XCTAssertTrue(try TelemetryQueue(storeDirectory: directory).batchesForFlush().isEmpty)
+    }
+
+    func testUnknownNamesKeysAndUnsafePermittedKeyValuesBlockWholeBatchBeforeBlobWrites() async throws {
+        let canary = "synthetic-transcript-prompt-error-CANARY\n用户文本"
+        let invalid = [
+            TelemetryEvent(name: canary), TelemetryEvent(name: "synthetic.unknown"),
+            TelemetryEvent(name: "synthetic.safe", properties: [canary: "1"]),
+            TelemetryEvent(name: "synthetic.safe", properties: ["error": canary]),
+            TelemetryEvent(name: "synthetic.safe", properties: ["transcript": canary]),
+            TelemetryEvent(name: "synthetic.safe", properties: ["phase": canary]),
+            TelemetryEvent(name: "synthetic.safe", properties: ["phase": "unknown"])
+        ] + ["NaN", "nan", "Infinity", "inf", "-inf", "1e999", "1.0\n", " 1", "0x10", "01", "+1", canary].map {
+            TelemetryEvent(name: "synthetic.safe", properties: ["duration": $0])
+        }
+        for (index, event) in invalid.enumerated() {
+            let store = directory.appendingPathComponent("case-\(index)")
+            let queue = TelemetryQueue(storeDirectory: store)
+            queue.enqueue(TelemetryEvent(name: "synthetic.safe", properties: ["duration": "1", "phase": "done"]))
+            queue.enqueue(event)
+            let files = try FileManager.default.contentsOfDirectory(at: store, includingPropertiesForKeys: nil)
+            let before = try files.map { try Data(contentsOf: $0) }
+            for candidate in [queue, TelemetryQueue(storeDirectory: store)] {
+                do { try await transport(privacy: privacyPolicy).flush(candidate); XCTFail("Unsafe batch must be blocked") }
+                catch {
+                    XCTAssertEqual(error as? AzureBlobError, .privacyRejected)
+                    XCTAssertEqual(String(describing: error), "privacyRejected", "Fixed content-free rejection")
+                }
+                XCTAssertTrue(http.requests.isEmpty)
+                XCTAssertEqual(try FileManager.default.contentsOfDirectory(at: store, includingPropertiesForKeys: nil), files)
+                XCTAssertEqual(try files.map { try Data(contentsOf: $0) }, before)
+                XCTAssertEqual(candidate.persistenceFailureCount, 0, "Privacy rejection is not a storage failure or delivery")
+            }
+        }
+    }
+
+    func testUnsafeDirtyMemorySuffixCannotRewriteDurablePrefixBeforeValidation() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        queue.enqueue(TelemetryEvent(name: "synthetic.safe", properties: ["duration": "1"]))
+        let before = try storedBytes()
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
+        queue.enqueue(TelemetryEvent(name: "synthetic.safe", properties: ["phase": "synthetic-user-text-CANARY"]))
+        XCTAssertEqual(queue.persistenceFailureCount, 1)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        do { try await transport(privacy: privacyPolicy).flush(queue); XCTFail("Do not persist rejected suffix") }
+        catch { XCTAssertEqual(error as? AzureBlobError, .privacyRejected) }
+        XCTAssertEqual(try storedBytes(), before)
+        XCTAssertEqual(queue.persistenceFailureCount, 1)
+        XCTAssertEqual(try queue.batchesForFlush(retryingWrites: false).flatMap(\.events).count, 2, "Keep both memory events")
+        XCTAssertTrue(http.requests.isEmpty)
+    }
+
+    func testStricterPolicyBlocksFrozenJournalWithoutChangingBytesOrAcknowledgingOverwrite() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        queue.enqueue(TelemetryEvent(name: "synthetic.safe", properties: ["duration": "1.25", "phase": "done"]))
+        http.state.withLock { $0.error = URLError(.timedOut) }
+        do { try await transport(privacy: privacyPolicy).flush(queue) } catch {}
+        XCTAssertEqual(http.requests.count, 1)
+        let before = try storedBytes()
+        let stricter = [
+            AzureBlobPrivacyPolicy(),
+            AzureBlobPrivacyPolicy(events: ["synthetic.safe": ["duration": .finiteNumber, "phase": .label(["retry"])]], apps: ["sample"], builds: ["test build+1"]),
+            AzureBlobPrivacyPolicy(events: privacyPolicy.events, apps: ["different-app"], builds: ["test build+1"]),
+            AzureBlobPrivacyPolicy(events: privacyPolicy.events, apps: ["sample"], builds: ["new-build"])
+        ]
+        http.state.withLock { $0.error = nil; $0.status = 403; $0.headers = ["x-ms-error-code": "UnauthorizedBlobOverwrite"] }
+        for policy in stricter {
+            do { try await transport(privacy: policy).flush(TelemetryQueue(storeDirectory: directory)); XCTFail("Stricter policy must block") }
+            catch { XCTAssertEqual(error as? AzureBlobError, .privacyRejected) }
+            XCTAssertEqual(http.requests.count, 1)
+            XCTAssertEqual(try storedBytes(), before)
+        }
+        try await transport(privacy: privacyPolicy).flush(TelemetryQueue(storeDirectory: directory))
+        XCTAssertEqual(http.requests.count, 2)
+        XCTAssertEqual(http.requests.first?.url, http.requests.last?.url)
+        XCTAssertEqual(try requestBody(XCTUnwrap(http.requests.first)), try requestBody(XCTUnwrap(http.requests.last)))
+        XCTAssertTrue(try TelemetryQueue(storeDirectory: directory).batchesForFlush().isEmpty)
+    }
+
+    func testUnsafeLegacyJournalBodyCannotHideBehindApprovedSourceDigest() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        queue.enqueue(TelemetryEvent(name: "synthetic.safe", properties: ["duration": "1", "phase": "done"], timestamp: Date(timeIntervalSince1970: 1_700_000_000)))
+        http.state.withLock { $0.error = URLError(.timedOut) }
+        do { try await transport(privacy: privacyPolicy).flush(queue) } catch {}
+        let id = try XCTUnwrap(queue.batchesForFlush().first?.id)
+        let valid = try XCTUnwrap(AzureBlobBatch.load(id: id, queue: queue))
+        let unsafe = Data("{\"name\":\"synthetic.safe\",\"properties\":{\"duration\":\"1\",\"phase\":\"done\"},\"timestamp\":\"2023-11-14T22:13:20Z\",\"transcript\":\"synthetic-CANARY\"}\n".utf8)
+        let unsafeGzip = try gzipFixture(unsafe)
+        XCTAssertTrue(String(decoding: try gunzip(unsafeGzip), as: UTF8.self).contains("CANARY"))
+        // Optional gzip filename/comment metadata is sent too, even if inflation
+        // yields approved NDJSON. The exporter has never generated these fields.
+        var hiddenFilename = Data(valid.body.prefix(10))
+        hiddenFilename[3] = 0x08
+        hiddenFilename.append(Data("synthetic-CANARY\0".utf8))
+        hiddenFilename.append(valid.body.dropFirst(10))
+        XCTAssertEqual(try gunzip(hiddenFilename), try gunzip(valid.body))
+        for body in [unsafeGzip, valid.body + unsafeGzip, valid.body + Data("CANARY".utf8), hiddenFilename] {
+            let old = AzureBlobBatch(version: valid.version, queueID: valid.queueID, containerURL: valid.containerURL,
+                path: valid.path, sourceDigest: valid.sourceDigest, body: body, mayHaveBeenSent: true)
+            try old.save(queue: queue)
+            let before = try storedBytes()
+            http.state.withLock { $0.error = nil; $0.status = 403; $0.headers = ["x-ms-error-code": "UnauthorizedBlobOverwrite"] }
+            do { try await transport(privacy: privacyPolicy).flush(TelemetryQueue(storeDirectory: directory)); XCTFail("Validate actual journal bytes") }
+            catch { XCTAssertEqual(error as? AzureBlobError, .privacyRejected) }
+            XCTAssertEqual(http.requests.count, 1)
+            XCTAssertEqual(try storedBytes(), before)
+        }
+    }
+
+    func testUnsafeLegacySourceAndMatchingJournalStayBlockedWithoutMigration() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        let id = UUID()
+        let canary = "synthetic-error-transcript-CANARY"
+        let event = TelemetryEvent(name: "synthetic.safe", properties: ["phase": canary], timestamp: Date(timeIntervalSince1970: 1_700_000_000))
+        try queue.persistBatch(id: id, events: [event])
+        let encoded = Data("{\"name\":\"synthetic.safe\",\"properties\":{\"phase\":\"synthetic-error-transcript-CANARY\"},\"timestamp\":\"2023-11-14T22:13:20Z\"}\n".utf8)
+        let legacy = AzureBlobBatch(version: 1, queueID: id, containerURL: http.container,
+            path: ["sample", "test build+1", "2023-11-14", UUID().uuidString.lowercased(), "\(UUID().uuidString.lowercased()).ndjson.gz"],
+            sourceDigest: AzureBlobBatch.digest(encoded), body: try gzipFixture(encoded), mayHaveBeenSent: true)
+        try legacy.save(queue: queue)
+        let before = try storedBytes()
+        http.state.withLock { $0.status = 403; $0.headers = ["x-ms-error-code": "UnauthorizedBlobOverwrite"] }
+        do { try await transport(privacy: privacyPolicy).flush(TelemetryQueue(storeDirectory: directory)); XCTFail("Old journal is not policy approval") }
+        catch { XCTAssertEqual(String(describing: error), "privacyRejected") }
+        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertEqual(try storedBytes(), before, "No disposal, rewritten receipt, or migration")
+        XCTAssertTrue(String(decoding: try gunzip(legacy.body), as: UTF8.self).contains("CANARY"), "Unsafe legacy bytes remain blocked, not erased")
+    }
+
+    func testApprovedLegacyGzipIsValidatedButNeverRecompressedOnRetry() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        let id = UUID()
+        try queue.persistBatch(id: id, events: [TelemetryEvent(name: "synthetic.safe", properties: ["duration": "1.25", "phase": "done"],
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000))])
+        let approved = Data("{\"name\":\"synthetic.safe\",\"properties\":{\"duration\":\"1.25\",\"phase\":\"done\"},\"timestamp\":\"2023-11-14T22:13:20Z\"}\n".utf8)
+        // A legacy stream with an explicit mtime and uncompressed DEFLATE encoding,
+        // different from the current compressor, is still an immutable valid request.
+        var body = try gzipFixture(approved)
+        body[4] = 17
+        let legacy = AzureBlobBatch(version: 1, queueID: id, containerURL: http.container,
+            path: ["sample", "test build+1", "2023-11-14", UUID().uuidString.lowercased(), "\(UUID().uuidString.lowercased()).ndjson.gz"],
+            sourceDigest: AzureBlobBatch.digest(approved), body: body, mayHaveBeenSent: true)
+        try legacy.save(queue: queue)
+        http.state.withLock { $0.status = 403; $0.headers = ["x-ms-error-code": "UnauthorizedBlobOverwrite"] }
+        try await transport(privacy: privacyPolicy).flush(TelemetryQueue(storeDirectory: directory))
+        XCTAssertEqual(try requestBody(XCTUnwrap(http.requests.first)), body)
+        XCTAssertEqual(try gunzip(body), approved)
+        XCTAssertEqual(http.requests.first?.url?.path, "/container/" + legacy.path.joined(separator: "/"))
+        XCTAssertTrue(try queue.batchesForFlush().isEmpty)
+    }
+
+    func testUnknownPathMetadataIsRejectedForNewAndExistingBatches() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        queue.enqueue(TelemetryEvent(name: "synthetic.safe"))
+        let original = try storedBytes()
+        for (app, build) in [("synthetic-CANARY", "test build+1"), ("sample", "synthetic-CANARY")] {
+            let sender = try AzureBlobTransport(containerURL: http.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
+                app: app, build: build, installID: UUID(), privacy: privacyPolicy, configuration: http.session.configuration)
+            do { try await sender.flush(queue); XCTFail("Syntax is not provenance") }
+            catch { XCTAssertEqual(error as? AzureBlobError, .privacyRejected) }
+            XCTAssertTrue(http.requests.isEmpty)
+            XCTAssertEqual(try storedBytes(), original)
+        }
+        http.state.withLock { $0.error = URLError(.timedOut) }
+        do { try await transport(privacy: privacyPolicy).flush(queue) } catch {}
+        let valid = try XCTUnwrap(AzureBlobBatch.load(id: XCTUnwrap(queue.batchesForFlush().first?.id), queue: queue))
+        for index in 0..<5 {
+            var path = valid.path
+            path[index] = "synthetic-CANARY"
+            try AzureBlobBatch(version: valid.version, queueID: valid.queueID, containerURL: valid.containerURL,
+                path: path, sourceDigest: valid.sourceDigest, body: valid.body, mayHaveBeenSent: true).save(queue: queue)
+            let before = try storedBytes()
+            do { try await transport(privacy: privacyPolicy).flush(TelemetryQueue(storeDirectory: directory)); XCTFail("Restored metadata must be validated") }
+            catch { XCTAssertEqual(error as? AzureBlobError, .privacyRejected) }
+            XCTAssertEqual(http.requests.count, 1)
+            XCTAssertEqual(try storedBytes(), before)
+        }
     }
 
     func testPutBlockBlobHasEncodedPathHeadersAndGzipNDJSONThenAcknowledges201() async throws {
@@ -165,7 +422,7 @@ final class AzureBlobTransportTests: XCTestCase {
         let other = BlobHTTPFixture()
         defer { other.close() }
         let changed = try AzureBlobTransport(containerURL: other.container, sasQuery: "sr=c&sig=other-fake",
-            app: "new-app", build: "2", installID: UUID(), configuration: other.session.configuration)
+            app: "new-app", build: "2", installID: UUID(), privacy: Self.fixturePrivacy, configuration: other.session.configuration)
         do { try await changed.flush(TelemetryQueue(storeDirectory: directory)); XCTFail("Destination changed") }
         catch { XCTAssertEqual(error as? AzureBlobError, .destinationChanged) }
         XCTAssertTrue(other.requests.isEmpty)
@@ -181,7 +438,7 @@ final class AzureBlobTransportTests: XCTestCase {
         queue.enqueue(TelemetryEvent(name: "synthetic.suffix"))
         do { try await transport().flush(queue); XCTFail("Do not upload a non-durable suffix") } catch {}
         XCTAssertTrue(http.requests.isEmpty)
-        XCTAssertEqual(queue.persistenceFailureCount, 3, "Enqueue, snapshot retry, required pre-upload write")
+        XCTAssertEqual(queue.persistenceFailureCount, 2, "Enqueue and validated pre-upload write; Blob snapshot must not retry before privacy validation")
         XCTAssertEqual(try TelemetryQueue(storeDirectory: directory).batchesForFlush().flatMap(\.events).map(\.name),
                        ["synthetic.prefix"])
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
@@ -347,19 +604,19 @@ final class AzureBlobTransportTests: XCTestCase {
 
     func testCredentialRotationRetainsOriginalAppInstallBuildPathAndLargeGzipBody() async throws {
         let queue = TelemetryQueue(storeDirectory: directory)
-        let largeSynthetic = (0..<12_000).map { "synthetic.\($0)" }.joined(separator: "\n")
-        queue.enqueue(TelemetryEvent(name: "synthetic.large", properties: ["fixture": largeSynthetic]))
+        let largeSynthetic = Dictionary(uniqueKeysWithValues: (0..<12_000).map { ("metric.\($0)", String($0)) })
+        queue.enqueue(TelemetryEvent(name: "synthetic.large", properties: largeSynthetic))
         http.state.withLock { $0.error = URLError(.timedOut, userInfo: [NSURLErrorFailingURLErrorKey: URL(string: "https://example.invalid/?sig=fake-sensitive")!]) }
         do { try await transport(build: "路径 #+?%").flush(queue); XCTFail("Unconfirmed") }
         catch { XCTAssertEqual(error as? AzureBlobError, .networkFailure) }
         let first = try XCTUnwrap(http.requests.first)
         let body = try requestBody(first)
         let event = try XCTUnwrap(JSONSerialization.jsonObject(with: gunzip(body)) as? [String: Any])
-        XCTAssertEqual((event["properties"] as? [String: String])?["fixture"], largeSynthetic)
+        XCTAssertEqual(event["properties"] as? [String: String], largeSynthetic)
         XCTAssertTrue(first.url!.absoluteString.contains("%E8%B7%AF%E5%BE%84%20%23%2B%3F%25"))
         http.state.withLock { $0.error = nil; $0.status = 403; $0.headers = ["x-ms-error-code": "UnauthorizedBlobOverwrite"] }
         let changed = try AzureBlobTransport(containerURL: http.container, sasQuery: "?sr=c&sp=c&sig=rotated-fake",
-            app: "new-app", build: "new-build", installID: UUID(), configuration: http.session.configuration)
+            app: "new-app", build: "new-build", installID: UUID(), privacy: Self.fixturePrivacy, configuration: http.session.configuration)
         try await changed.flush(TelemetryQueue(storeDirectory: directory))
         XCTAssertEqual(http.requests.last?.url?.path, first.url?.path)
         XCTAssertEqual(http.requests.last?.url?.query, "sr=c&sp=c&sig=rotated-fake")
@@ -420,7 +677,7 @@ final class AzureBlobTransportTests: XCTestCase {
         }
         let sender = try AzureBlobTransport(containerURL: fixture.container,
             sasQuery: "sv=2023-11-03&sr=c&si=synthetic&sig=fake%2Bonly%2F%3D", app: "sample", build: "before-kill",
-            installID: UUID(), configuration: fixture.session.configuration)
+            installID: UUID(), privacy: Self.fixturePrivacy, configuration: fixture.session.configuration)
         try await sender.flush(queue)
         XCTFail("Process should have been killed in mocked upload")
     }
@@ -530,4 +787,20 @@ private func gunzip(_ input: Data) throws -> Data {
         XCTAssertEqual(stream.avail_in, 0)
         return output
     }
+}
+
+// Construct legacy/malformed synthetic wire fixtures independently of the exporter.
+// RFC1952 header + one uncompressed DEFLATE block + CRC32/ISIZE trailer.
+private func gzipFixture(_ bytes: Data) throws -> Data {
+    guard bytes.count < 65_536 else { throw AzureBlobError.encodingFailure }
+    let count = UInt16(bytes.count)
+    var result = Data([0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0, 0xff, 0x01])
+    result.append(contentsOf: [UInt8(truncatingIfNeeded: count), UInt8(count >> 8),
+                              UInt8(truncatingIfNeeded: ~count), UInt8((~count) >> 8)])
+    result.append(bytes)
+    let checksum = bytes.withUnsafeBytes { crc32(0, $0.bindMemory(to: Bytef.self).baseAddress, uInt(bytes.count)) }
+    for value in [UInt32(checksum), UInt32(bytes.count)] {
+        for shift in stride(from: 0, to: 32, by: 8) { result.append(UInt8(truncatingIfNeeded: value >> shift)) }
+    }
+    return result
 }

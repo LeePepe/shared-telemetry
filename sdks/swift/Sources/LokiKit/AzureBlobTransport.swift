@@ -1,7 +1,7 @@
 import Foundation
 import zlib
 
-/// Internal, opt-in transport core. Public event wiring awaits the privacy contract;
+/// Internal, default-deny transport core. Product-owned rules are explicit;
 /// TelemetryEvent properties do NOT inherit LokiLogSink's filtering.
 struct AzureBlobTransport: Sendable {
     private let containerURL: URL
@@ -9,8 +9,10 @@ struct AzureBlobTransport: Sendable {
     private let prefix: [String]
     private let protocolClasses: [AnyClass]?
     private let now: @Sendable () -> Date
+    private let privacy: AzureBlobPrivacyPolicy
 
     init(containerURL: URL, sasQuery: String, app: String, build: String, installID: UUID,
+         privacy: AzureBlobPrivacyPolicy = .init(),
          configuration: URLSessionConfiguration = .ephemeral, now: @escaping @Sendable () -> Date = { Date() }) throws {
         guard let url = URLComponents(url: containerURL, resolvingAgainstBaseURL: false),
               url.scheme == "https", url.host != nil, url.user == nil, url.password == nil,
@@ -27,6 +29,7 @@ struct AzureBlobTransport: Sendable {
         // inherit a caller's delegate, credential/cookie stores, headers or proxies.
         self.protocolClasses = configuration.protocolClasses
         self.now = now
+        self.privacy = privacy
     }
 
     func flush(_ queue: TelemetryQueue) async throws {
@@ -45,14 +48,24 @@ struct AzureBlobTransport: Sendable {
         // Reuse connections only within this flush; release session/delegate resources
         // on success, storage/network failure and cancellation, with no caller lifecycle.
         defer { session.invalidateAndCancel() }
-        for batch in try queue.batchesForFlush() {
+        for batch in try queue.batchesForFlush(retryingWrites: false) {
+            try privacy.validate(batch.events)
+            let stored = try AzureBlobBatch.load(id: batch.id, queue: queue)
+            if let stored {
+                guard stored.containerURL == containerURL else { throw AzureBlobError.destinationChanged }
+                try privacy.validatePath(stored.path)
+            } else {
+                try privacy.validateMetadata(app: prefix[0], build: prefix[1])
+            }
             let source = try Self.ndjson(batch.events)
             var prepared: AzureBlobBatch
-            if let stored = try AzureBlobBatch.load(id: batch.id, queue: queue) {
-                guard stored.containerURL == containerURL else { throw AzureBlobError.destinationChanged }
+            if let stored {
                 guard stored.sourceDigest == AzureBlobBatch.digest(source) else {
                     throw AzureBlobError.invalidStoredBatch
                 }
+                // A source digest is not privacy approval of the saved wire body.
+                // Require its ENTIRE gzip stream to match currently approved source.
+                try Self.validateGzip(stored.body, equals: source)
                 prepared = stored
             } else {
                 // A failed enqueue rewrite may have left only a prefix on disk. Never
@@ -202,11 +215,48 @@ struct AzureBlobTransport: Sendable {
             return result
         }
     }
+
+    private static func validateGzip(_ input: Data, equals approved: Data) throws {
+        // The original exporter used a plain gzip header. Optional filename,
+        // comment or extra fields could carry content outside the inflated NDJSON.
+        guard input.count >= 18, input.count <= Int(uInt.max), input[3] == 0 else {
+            throw AzureBlobError.privacyRejected
+        }
+        var stream = z_stream()
+        guard inflateInit2_(&stream, MAX_WBITS + 16, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK else {
+            throw AzureBlobError.privacyRejected
+        }
+        defer { inflateEnd(&stream) }
+        try input.withUnsafeBytes { source in
+            stream.next_in = UnsafeMutablePointer(mutating: source.bindMemory(to: Bytef.self).baseAddress)
+            stream.avail_in = uInt(input.count)
+            var offset = 0
+            var status: Int32 = Z_OK
+            repeat {
+                var buffer = [UInt8](repeating: 0, count: 16_384)
+                status = buffer.withUnsafeMutableBytes { output in
+                    stream.next_out = output.bindMemory(to: Bytef.self).baseAddress
+                    stream.avail_out = uInt(output.count)
+                    return inflate(&stream, Z_NO_FLUSH)
+                }
+                let count = buffer.count - Int(stream.avail_out)
+                guard status == Z_OK || status == Z_STREAM_END,
+                      count <= approved.count - offset,
+                      approved[offset..<(offset + count)].elementsEqual(buffer.prefix(count)) else {
+                    throw AzureBlobError.privacyRejected
+                }
+                offset += count
+            } while status != Z_STREAM_END
+            // No ignored tail, concatenated gzip member or extra JSON field may leak.
+            guard offset == approved.count, stream.avail_in == 0 else { throw AzureBlobError.privacyRejected }
+        }
+    }
 }
 
 enum AzureBlobError: Error, Equatable {
     case invalidConfiguration, encodingFailure, networkFailure, invalidResponse
     case persistenceFailure, invalidStoredBatch, destinationChanged
+    case privacyRejected
     case httpFailure(Int)
 }
 
