@@ -15,7 +15,10 @@ different resolved version when reporting tested evidence.
 
 Existing provider tests include one explicit opt-in live-Loki test that stays
 skipped in ordinary runs. Mock URLProtocol tests do not count as that live test.
-Event enqueue/flush ordering, unbounded event queue, legacy product-specific
+Unreleased source closes the asynchronous enqueue/flush window with synchronous
+atomic persistence and a storage-failure counter; the existing public methods,
+initializer and legacy JSON batch format remain compatible. Synchronous file
+I/O latency and write amplification are caller-visible costs. Unbounded event queue, legacy product-specific
 event names, real receiver authentication/storage readback, four-metric coverage,
 dependency/security scans and full D1 remain open or unmeasured. There is no
 whole-SDK redaction claim and no complete 6DQ pass.

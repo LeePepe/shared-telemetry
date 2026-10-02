@@ -1,5 +1,15 @@
 # Swift release changes
 
+## Unreleased — durable event enqueue
+
+- Attempt atomic persistence before enabled `track` returns; retain failed writes
+  in memory and expose cumulative per-instance `persistenceFailureCount`.
+- Snapshot batches for serial retry and delete only after successful transport;
+  concurrent enqueue/flush cannot clear a newer batch.
+- Keep existing public signatures and legacy JSON batch compatibility. Storage
+  I/O now blocks `track`; no disk limit, overflow policy, release or lossless
+  delivery guarantee is introduced.
+
 ## 0.1.0 — first release (Git tag v0.1.0)
 
 - Ship a version-bound Swift consumer entry, registry/schema, integration and
