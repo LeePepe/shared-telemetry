@@ -43,4 +43,8 @@ analyzer and Grafana asset directories stay byte-for-byte unchanged.
 - Financial frontend (`@leepepe/loki-web`, local path install).
 
 Breaking SDK API changes need a coordinated consumer `adopt` PR in each consumer
-repository. There is no release tag yet; consumers pin a commit SHA.
+repository. For released tag `v0.1.0` and its exact source revision, see the
+[SDK index](../../sdks/README.md). Select an immutable dependency and matching
+documentation: the [Swift release-unit contract](../../ai/README.md) owns
+resolved-checkout discovery; [Web](../../sdks/web/README.md) and
+[Python](../../sdks/python/README.md) route to their installed-package contracts.
