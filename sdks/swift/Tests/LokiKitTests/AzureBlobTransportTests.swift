@@ -114,6 +114,20 @@ final class AzureBlobTransportTests: XCTestCase {
         XCTAssertEqual(queue.persistenceFailureCount, 0)
     }
 
+    func testFirstServerErrorRemainsAmbiguousUntilExactOverwriteReceiptOnRestart() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        queue.enqueue(TelemetryEvent(name: "synthetic.server-error"))
+        http.state.withLock { $0.status = 503 }
+        do { try await transport().flush(queue); XCTFail("Server error is not success") } catch {}
+        XCTAssertEqual(try queue.batchesForFlush().flatMap(\.events).count, 1)
+        http.state.withLock { $0.status = 403; $0.headers = ["x-ms-error-code": "UnauthorizedBlobOverwrite"] }
+        let restarted = TelemetryQueue(storeDirectory: directory)
+        try await transport().flush(restarted)
+        XCTAssertEqual(http.requests.first?.url, http.requests.last?.url)
+        XCTAssertEqual(try requestBody(XCTUnwrap(http.requests.first)), try requestBody(XCTUnwrap(http.requests.last)))
+        XCTAssertTrue(try restarted.batchesForFlush().isEmpty)
+    }
+
     func testAllOtherHTTPFailuresRetainAmbiguousBatchUntil201() async throws {
         let queue = TelemetryQueue(storeDirectory: directory)
         queue.enqueue(TelemetryEvent(name: "synthetic.errors"))

@@ -57,8 +57,9 @@ struct AzureBlobTransport: Sendable {
             let reply = try await put(prepared.body, path: prepared.path)
             let overwrite = reply.status == 403 && reply.code == "UnauthorizedBlobOverwrite"
             guard reply.status == 201 || (retransmission && overwrite) else {
-                if !retransmission {
-                    // A definitive first rejection does not prove an earlier upload.
+                if !retransmission && reply.status < 500 {
+                    // A completed first rejection does not prove an earlier upload.
+                    // A 5xx may follow a partial server operation; keep its marker.
                     prepared.mayHaveBeenSent = false
                     try prepared.save(queue: queue)
                 }
