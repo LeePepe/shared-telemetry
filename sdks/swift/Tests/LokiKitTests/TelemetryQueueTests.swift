@@ -337,4 +337,23 @@ final class TelemetryQueueTests: XCTestCase {
         XCTAssertEqual(Set(restored.map(\.name)), Set((0..<50).map { "synthetic.\($0)" }))
         XCTAssertEqual(q.persistenceFailureCount, 0)
     }
+
+    func testRestartUsesLegacyFileOrderRatherThanLostInMemoryOrder() throws {
+        let queue = TelemetryQueue(storeDirectory: tmpDir)
+        queue.enqueue(TelemetryEvent(name: "first"))
+        let firstID = try XCTUnwrap(queue.batchesForFlush().first?.id)
+        queue.enqueue(TelemetryEvent(name: "second"))
+        let secondID = try XCTUnwrap(queue.loadPersistedBatches().first { $0.id != firstID }?.id)
+        // Simulate creation times refreshed by an older batch's atomic retry.
+        for (id, seconds) in [(firstID, 1_700_000_020.0), (secondID, 1_700_000_010.0)] {
+            try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: seconds)],
+                ofItemAtPath: tmpDir.appendingPathComponent("\(id).json").path)
+        }
+        XCTAssertEqual(try queue.batchesForFlush().flatMap(\.events).map(\.name), ["first", "second"])
+        let restarted = TelemetryQueue(storeDirectory: tmpDir)
+        XCTAssertEqual(try restarted.batchesForFlush().flatMap(\.events).map(\.name), ["second", "first"],
+                       "Legacy files contain no durable enqueue-order key; restart keeps file-creation order")
+        XCTAssertEqual(queue.persistenceFailureCount, 0)
+        XCTAssertEqual(restarted.persistenceFailureCount, 0)
+    }
 }

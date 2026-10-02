@@ -86,10 +86,11 @@ final class TelemetryQueue: Sendable {
                 // prevent transport from delivering the retained memory originals.
                 return value.pending
             }
-            let originals = Dictionary(uniqueKeysWithValues: value.pending.map { ($0.id, $0.events) })
-            let storedIDs = Set(stored.map(\.id))
-            return stored.map { ($0.id, originals[$0.id] ?? $0.events) }
-                + value.pending.filter { !storedIDs.contains($0.id) }
+            // Replay recovered history first, then live batches in enqueue order.
+            // Atomic retries can refresh file dates; they must not reorder known IDs
+            // or replace originals with a persisted prefix after a failed rewrite.
+            let pendingIDs = Set(value.pending.map(\.id))
+            return stored.filter { !pendingIDs.contains($0.id) } + value.pending
         }
     }
 

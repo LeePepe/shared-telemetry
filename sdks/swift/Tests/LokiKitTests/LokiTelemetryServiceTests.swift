@@ -67,6 +67,101 @@ final class LokiTelemetryServiceTests: XCTestCase {
         XCTAssertTrue(try TelemetryQueue(storeDirectory: directory).loadPersistedBatches().isEmpty)
     }
 
+    func testFailedFinalEnqueueRewriteDoesNotSendNewerBatchBeforeOlderBatch() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        let telemetry = service(queue: queue)
+        for index in 0..<63 {
+            telemetry.track(name: "synthetic.ordered", properties: ["sequence": "\(index)"])
+        }
+        let olderID = try XCTUnwrap(queue.loadPersistedBatches().first?.id)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
+        telemetry.track(name: "synthetic.ordered", properties: ["sequence": "63"])
+        XCTAssertEqual(telemetry.persistenceFailureCount, 1)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        telemetry.track(name: "synthetic.ordered", properties: ["sequence": "64"])
+        let before = try queue.loadPersistedBatches()
+        XCTAssertEqual(before.map(\.events.count), [63, 1])
+        let newerID = try XCTUnwrap(before.last?.id)
+        // Separate file dates without a clock/sleep race. Retrying A's atomic write
+        // can refresh its creation time past B; that must not change live send order.
+        for (id, seconds) in [(olderID, 1_700_000_000.0), (newerID, 1_700_000_010.0)] {
+            try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: seconds)],
+                ofItemAtPath: directory.appendingPathComponent("\(id).json").path)
+        }
+        XCTAssertEqual(try queue.loadPersistedBatches().map(\.id), [olderID, newerID])
+
+        await telemetry.flush()
+        await telemetry.flush()
+        XCTAssertEqual(try sentLines(), [(0..<64).map { "sequence=\($0)" }, ["sequence=64"]],
+                       "Every event, including the failed-write suffix, must be sent once in live batch order")
+        XCTAssertTrue(try queue.batchesForFlush().isEmpty)
+        XCTAssertTrue(try queue.loadPersistedBatches().isEmpty)
+        XCTAssertEqual(telemetry.persistenceFailureCount, 1)
+    }
+
+    func testRecoveredHistoryPrecedesKnownBatchesAndMemoryOnlyFallbackWithoutDuplicates() async throws {
+        let history = TelemetryQueue(storeDirectory: directory)
+        let firstID = UUID()
+        let secondID = UUID()
+        try history.persistBatch(id: firstID, events: [TelemetryEvent(name: "synthetic.ordered",
+            properties: ["sequence": "history.first"])])
+        try history.persistBatch(id: secondID, events: [TelemetryEvent(name: "synthetic.ordered",
+            properties: ["sequence": "history.second"])])
+        let queue = TelemetryQueue(storeDirectory: directory)
+        let telemetry = service(queue: queue)
+        for index in 0..<64 {
+            telemetry.track(name: "synthetic.ordered", properties: ["sequence": "\(index)"])
+        }
+        let currentID = try XCTUnwrap(queue.loadPersistedBatches()
+            .first { $0.id != firstID && $0.id != secondID }?.id)
+        // History's own disk order is authoritative, even if filesystem dates put
+        // a known current-process batch before it. Event timestamps are not a FIFO key.
+        for (id, seconds) in [(currentID, 1_700_000_000.0), (secondID, 1_700_000_020.0),
+                              (firstID, 1_700_000_010.0)] {
+            try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: seconds)],
+                ofItemAtPath: directory.appendingPathComponent("\(id).json").path)
+        }
+        XCTAssertEqual(try queue.loadPersistedBatches().map(\.id), [currentID, firstID, secondID])
+        let store = try XCTUnwrap(directory)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: store.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: store.path) }
+        telemetry.track(name: "synthetic.ordered", properties: ["sequence": "64"])
+        XCTAssertEqual(telemetry.persistenceFailureCount, 1)
+        TelemetryURLProtocol.state.withLock {
+            $0.onRequest = {
+                // Snapshot retries have already failed. Restore only for post-send
+                // deletion, keeping the final event memory-only in this snapshot.
+                do {
+                    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: store.path)
+                } catch {
+                    XCTFail("Failed to restore synthetic store permissions")
+                }
+            }
+        }
+
+        await telemetry.flush()
+        await telemetry.flush()
+        XCTAssertEqual(try sentLines(), [["sequence=history.first"], ["sequence=history.second"],
+            (0..<64).map { "sequence=\($0)" }, ["sequence=64"]])
+        XCTAssertTrue(try queue.batchesForFlush().isEmpty)
+        XCTAssertTrue(try queue.loadPersistedBatches().isEmpty)
+        XCTAssertEqual(telemetry.persistenceFailureCount, 2, "Only enqueue and snapshot write retries failed")
+    }
+
+    private func sentLines() throws -> [[String]] {
+        try TelemetryURLProtocol.state.withLock { $0.bodies }.map { data in
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let streams = try XCTUnwrap(body["streams"] as? [[String: Any]])
+            XCTAssertEqual(streams.count, 1, "Ordering fixtures use a single event name per request")
+            let values = try XCTUnwrap(streams.first?["values"] as? [[String]])
+            return try values.map { value in
+                XCTAssertEqual(value.count, 2)
+                return try XCTUnwrap(value.last)
+            }
+        }
+    }
+
     func testConcurrentFlushDoesNotDuplicateAndEnqueueDuringSendSurvives() async throws {
         let telemetry = service()
         let entered = expectation(description: "transport started")

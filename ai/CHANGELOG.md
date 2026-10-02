@@ -6,6 +6,9 @@
   in memory and expose cumulative per-instance `persistenceFailureCount`.
 - Snapshot batches for serial retry and delete only after successful transport;
   concurrent enqueue/flush cannot clear a newer batch.
+- Replay recovered history before current-instance batches; preserve live batch
+  enqueue order across atomic write retries without duplicating disk/memory IDs.
+  Restart still uses legacy file-creation order, not durable enqueue FIFO.
 - Rotate internal batches without eviction to bound per-enqueue rewrite growth;
   retain memory delivery during directory-read failure and count inaccessible
   stores/removals instead of treating them as missing.
