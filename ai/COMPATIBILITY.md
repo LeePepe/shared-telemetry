@@ -18,7 +18,9 @@ skipped in ordinary runs. Mock URLProtocol tests do not count as that live test.
 Unreleased source closes the asynchronous enqueue/flush window with synchronous
 atomic persistence and a storage-failure counter; the existing public methods,
 initializer and legacy JSON batch format remain compatible. Synchronous file
-I/O latency and write amplification are caller-visible costs. Unbounded event queue, legacy product-specific
+I/O latency and write amplification are caller-visible costs; internal batch
+rotation bounds rewrite growth without discarding events or changing the disk
+format. Unbounded event queue, legacy product-specific
 event names, real receiver authentication/storage readback, four-metric coverage,
 dependency/security scans and full D1 remain open or unmeasured. There is no
 whole-SDK redaction claim and no complete 6DQ pass.

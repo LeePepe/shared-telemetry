@@ -78,9 +78,13 @@ final class LokiTelemetryServiceTests: XCTestCase {
             }
         }
         telemetry.track(name: "in-flight", properties: [:])
+        let original = try XCTUnwrap(TelemetryQueue(storeDirectory: directory).loadPersistedBatches().first)
+        let originalFile = directory.appendingPathComponent("\(original.id).json")
+        let frozenBytes = try Data(contentsOf: originalFile)
         let sending = Task { await telemetry.flush() }
         await fulfillment(of: [entered], timeout: 3)
         telemetry.track(name: "next", properties: [:])
+        XCTAssertEqual(try Data(contentsOf: originalFile), frozenBytes, "In-flight data must remain frozen")
         await telemetry.flush()
         XCTAssertEqual(TelemetryURLProtocol.state.withLock { $0.bodies.count }, 1)
         TelemetryURLProtocol.state.withLock { $0.onRequest = nil }
@@ -108,6 +112,34 @@ final class LokiTelemetryServiceTests: XCTestCase {
         await telemetry.flush()
         XCTAssertTrue(try queue.loadPersistedBatches().isEmpty)
         XCTAssertEqual(telemetry.persistenceFailureCount, 1)
+    }
+
+    func testBlockedStoreStillDeliversMemoryAndRetainsFailedTransport() async throws {
+        let blocked = directory.appendingPathComponent("not-a-directory")
+        try Data("synthetic".utf8).write(to: blocked)
+        let queue = TelemetryQueue(storeDirectory: blocked)
+        let telemetry = service(queue: queue)
+        telemetry.track(name: "memory-only", properties: [:])
+        XCTAssertEqual(telemetry.persistenceFailureCount, 1)
+
+        TelemetryURLProtocol.state.withLock { $0.status = 503 }
+        await telemetry.flush()
+        XCTAssertEqual(TelemetryURLProtocol.state.withLock { $0.bodies.count }, 1)
+        XCTAssertEqual(telemetry.persistenceFailureCount, 3, "Enqueue, retry write and directory read failed")
+
+        TelemetryURLProtocol.state.withLock { $0.status = 204 }
+        await telemetry.flush()
+        let bodies = TelemetryURLProtocol.state.withLock { $0.bodies }
+        XCTAssertEqual(bodies.count, 2, "Failed transport must retain the memory event for retry")
+        XCTAssertTrue(String(decoding: try XCTUnwrap(bodies.last), as: UTF8.self).contains("memory-only"))
+        XCTAssertEqual(try Data(contentsOf: blocked), Data("synthetic".utf8), "Store stays blocked throughout both flushes")
+        XCTAssertEqual(telemetry.persistenceFailureCount, 6, "Retry write, read and removal also failed")
+        try FileManager.default.removeItem(at: blocked)
+        await telemetry.flush()
+        XCTAssertEqual(TelemetryURLProtocol.state.withLock { $0.bodies.count }, 3,
+                       "An unconfirmed removal retains retryable work; duplicate delivery is possible")
+        XCTAssertTrue(try queue.batchesForFlush().isEmpty)
+        XCTAssertEqual(telemetry.persistenceFailureCount, 6)
     }
 
     func testDisabledServiceDoesNotEnqueueOrErasePendingData() async throws {

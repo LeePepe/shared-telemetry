@@ -176,6 +176,49 @@ final class TelemetryQueueTests: XCTestCase {
         XCTAssertTrue(try q.loadPersistedBatches().isEmpty)
     }
 
+    func testUnsearchableDirectoryRemovalIsCountedAndRetryable() throws {
+        let q = TelemetryQueue(storeDirectory: tmpDir)
+        q.enqueue(TelemetryEvent(name: "retained"))
+        let id = try XCTUnwrap(q.loadPersistedBatches().first?.id)
+        try FileManager.default.setAttributes([.posixPermissions: 0o400], ofItemAtPath: tmpDir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tmpDir.path) }
+        XCTAssertThrowsError(try q.removeBatch(id: id), "EACCES is not ENOENT")
+        XCTAssertEqual(q.persistenceFailureCount, 1)
+        XCTAssertThrowsError(try q.removeBatch(id: id))
+        XCTAssertEqual(q.persistenceFailureCount, 2, "Count each actual removal attempt")
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tmpDir.path)
+        XCTAssertEqual(try q.loadPersistedBatches().map(\.id), [id])
+        try q.removeBatch(id: id)
+        XCTAssertTrue(try q.batchesForFlush().isEmpty)
+        XCTAssertEqual(q.persistenceFailureCount, 2)
+    }
+
+    func testUnsearchableAncestorReadIsCountedAndRetryable() throws {
+        let q = TelemetryQueue(storeDirectory: tmpDir.appendingPathComponent("queue"))
+        q.enqueue(TelemetryEvent(name: "retained"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o400], ofItemAtPath: tmpDir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tmpDir.path) }
+        XCTAssertThrowsError(try q.loadPersistedBatches(), "EACCES is not an empty queue")
+        XCTAssertEqual(q.persistenceFailureCount, 1)
+        XCTAssertThrowsError(try q.loadPersistedBatches())
+        XCTAssertEqual(q.persistenceFailureCount, 2)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tmpDir.path)
+        XCTAssertEqual(try q.loadPersistedBatches().flatMap(\.events).map(\.name), ["retained"])
+        XCTAssertEqual(q.persistenceFailureCount, 2)
+    }
+
+    func testRemovingActuallyMissingFileDoesNotCountFailure() throws {
+        let q = TelemetryQueue(storeDirectory: tmpDir.appendingPathComponent("missing"))
+        try q.removeBatch(id: UUID())
+        XCTAssertTrue(try q.loadPersistedBatches().isEmpty)
+        q.enqueue(TelemetryEvent(name: "acknowledged"))
+        let id = try XCTUnwrap(q.loadPersistedBatches().first?.id)
+        try FileManager.default.removeItem(at: q.storeDirectory.appendingPathComponent("\(id).json"))
+        try q.removeBatch(id: id)
+        XCTAssertTrue(try q.batchesForFlush().isEmpty)
+        XCTAssertEqual(q.persistenceFailureCount, 0)
+    }
+
     func testLegacyBatchLoadsAndNewBatchIsReadableByLegacyDecoder() throws {
         let legacyID = UUID()
         let legacy = "[{\"name\":\"legacy\",\"properties\":{\"count\":\"2\"},\"timestamp\":\"2023-11-14T22:13:20Z\"}]"
@@ -205,18 +248,83 @@ final class TelemetryQueueTests: XCTestCase {
         XCTAssertEqual(q.persistenceFailureCount, 1)
     }
 
+    func testEnqueueRotatesBoundedLegacyFilesWithoutDroppingOrRewritingSealedBatches() throws {
+        let q = TelemetryQueue(storeDirectory: tmpDir)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var sealed: [URL: Data] = [:]
+        for chunk in 0..<4 {
+            for index in (chunk * 64)..<((chunk + 1) * 64) {
+                q.enqueue(TelemetryEvent(name: "synthetic.\(index)"))
+            }
+            for (url, bytes) in sealed {
+                XCTAssertEqual(try Data(contentsOf: url), bytes, "Later enqueue must not grow a sealed batch")
+            }
+            let files = try FileManager.default.contentsOfDirectory(at: tmpDir, includingPropertiesForKeys: nil)
+            XCTAssertEqual(files.count, chunk + 1)
+            for url in files {
+                XCTAssertNotNil(UUID(uuidString: url.deletingPathExtension().lastPathComponent))
+                let bytes = try Data(contentsOf: url)
+                XCTAssertEqual(try decoder.decode([TelemetryEvent].self, from: bytes).count, 64)
+                sealed[url] = bytes
+            }
+        }
+        let restored = try TelemetryQueue(storeDirectory: tmpDir).loadPersistedBatches().flatMap(\.events)
+        XCTAssertEqual(restored.count, 256)
+        XCTAssertEqual(Set(restored.map(\.name)), Set((0..<256).map { "synthetic.\($0)" }))
+        XCTAssertEqual(q.persistenceFailureCount, 0)
+    }
+
     func testSynchronousEnqueueLatencySampleAndFullBatchRecovery() throws {
         let q = TelemetryQueue(storeDirectory: tmpDir)
         var durations: [Double] = []
-        for index in 0..<200 {
-            let start = Date()
+        let started = DispatchTime.now().uptimeNanoseconds
+        for index in 0..<5_000 {
+            let start = DispatchTime.now().uptimeNanoseconds
             q.enqueue(TelemetryEvent(name: "synthetic.\(index)", properties: ["count": "1"]))
-            durations.append(Date().timeIntervalSince(start) * 1_000)
+            durations.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+            if (index + 1).isMultiple(of: 1_000) {
+                let window = durations.suffix(200).sorted()
+                print("ENQUEUE_WINDOW_MS total=\(index + 1) median=\(window[100]) p95=\(window[190]) max=\(window[199])")
+            }
         }
-        XCTAssertEqual(try TelemetryQueue(storeDirectory: tmpDir).loadPersistedBatches().flatMap(\.events).count, 200)
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+        let restored = try TelemetryQueue(storeDirectory: tmpDir).loadPersistedBatches().flatMap(\.events)
+        XCTAssertEqual(restored.count, 5_000)
+        XCTAssertEqual(Set(restored.map(\.name)), Set((0..<5_000).map { "synthetic.\($0)" }))
         XCTAssertEqual(q.persistenceFailureCount, 0)
         durations.sort()
-        print("ENQUEUE_LATENCY_MS sample=200 median=\(durations[100]) p95=\(durations[190]) max=\(durations[199])")
+        // Indicative host timings only: correctness is gated by recovery/rotation, not the clock.
+        print("ENQUEUE_LATENCY_MS sample=5000 total=\(elapsed) median=\(durations[2500]) p95=\(durations[4750]) max=\(durations[4999])")
+    }
+
+    func testRotationRetainsFailedRewritePrefixAndMemorySuffixAcrossRemovalFailure() throws {
+        let q = TelemetryQueue(storeDirectory: tmpDir)
+        for index in 0..<63 { q.enqueue(TelemetryEvent(name: "synthetic.\(index)")) }
+        let originalID = try XCTUnwrap(q.loadPersistedBatches().first?.id)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: tmpDir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tmpDir.path) }
+        q.enqueue(TelemetryEvent(name: "synthetic.63"))
+        q.enqueue(TelemetryEvent(name: "synthetic.64"))
+        XCTAssertEqual(q.persistenceFailureCount, 2)
+        XCTAssertEqual(try q.loadPersistedBatches().first?.events.count, 63, "Failed rewrite leaves the durable prefix")
+        let snapshot = try q.batchesForFlush()
+        XCTAssertEqual(snapshot.map(\.events.count), [64, 1])
+        XCTAssertEqual(snapshot.first?.id, originalID)
+        XCTAssertEqual(snapshot.flatMap(\.events).map(\.name), (0..<65).map { "synthetic.\($0)" })
+        XCTAssertEqual(q.persistenceFailureCount, 4)
+        XCTAssertThrowsError(try q.removeBatch(id: originalID))
+        XCTAssertEqual(q.persistenceFailureCount, 5)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tmpDir.path)
+        let recovered = try q.batchesForFlush()
+        XCTAssertEqual(Set(recovered.map(\.id)), Set(snapshot.map(\.id)))
+        let restarted = try TelemetryQueue(storeDirectory: tmpDir).loadPersistedBatches().flatMap(\.events)
+        XCTAssertEqual(restarted.count, 65)
+        XCTAssertEqual(Set(restarted.map(\.name)), Set((0..<65).map { "synthetic.\($0)" }))
+        for batch in recovered { try q.removeBatch(id: batch.id) }
+        XCTAssertTrue(try q.batchesForFlush().isEmpty)
+        XCTAssertEqual(q.persistenceFailureCount, 5)
     }
 
     func testConcurrentEnqueuesPersistEveryEvent() throws {

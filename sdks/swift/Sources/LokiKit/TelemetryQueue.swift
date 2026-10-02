@@ -16,6 +16,8 @@ final class TelemetryQueue: Sendable {
     }
 
     private let state = Mutex(State())
+    // Bound rewrite work, not retention: full batches stay queued until acknowledged.
+    private static let eventsPerBatch = 64
     let storeDirectory: URL
 
     init(storeDirectory: URL? = nil) {
@@ -30,16 +32,18 @@ final class TelemetryQueue: Sendable {
 
     func enqueue(_ event: TelemetryEvent) {
         state.withLock { value in
-            let id = value.activeID ?? UUID()
-            value.activeID = id
-            let index: Int
-            if let existing = value.pending.firstIndex(where: { $0.id == id }) {
-                index = existing
-            } else {
-                index = value.pending.count
+            if value.activeID == nil {
+                let id = UUID()
+                value.activeID = id
                 value.pending.append((id, []))
             }
+            // The active batch is always last; enqueue does not scan the backlog.
+            let index = value.pending.count - 1
+            let id = value.pending[index].id
             value.pending[index].events.append(event)
+            if value.pending[index].events.count == Self.eventsPerBatch {
+                value.activeID = nil
+            }
             value.dirty.insert(id)
             let batch = value.pending[index]
             do {
@@ -63,7 +67,7 @@ final class TelemetryQueue: Sendable {
 
     /// A snapshot, never a destructive take. Enqueues during transport belong to a later flush.
     func batchesForFlush() throws -> [Batch] {
-        try state.withLock { value in
+        state.withLock { value in
             // Freeze file contents before transport; concurrent tracks start a new batch.
             value.activeID = nil
             for batch in value.pending where value.dirty.contains(batch.id) {
@@ -74,7 +78,14 @@ final class TelemetryQueue: Sendable {
                     value.persistenceFailures += 1
                 }
             }
-            let stored = try readBatches(state: &value)
+            let stored: [Batch]
+            do {
+                stored = try readBatches(state: &value)
+            } catch {
+                // The read already counted its failure. Storage unavailability must not
+                // prevent transport from delivering the retained memory originals.
+                return value.pending
+            }
             let originals = Dictionary(uniqueKeysWithValues: value.pending.map { ($0.id, $0.events) })
             let storedIDs = Set(stored.map(\.id))
             return stored.map { ($0.id, originals[$0.id] ?? $0.events) }
@@ -101,17 +112,16 @@ final class TelemetryQueue: Sendable {
     func removeBatch(id: UUID) throws {
         try state.withLock { value in
             do {
-                let url = file(id)
-                if FileManager.default.fileExists(atPath: url.path) {
-                    try FileManager.default.removeItem(at: url)
-                }
-                value.pending.removeAll { $0.id == id }
-                value.dirty.remove(id)
-                if value.activeID == id { value.activeID = nil }
+                try FileManager.default.removeItem(at: file(id))
             } catch {
-                value.persistenceFailures += 1
-                throw error
+                if !isNotFound(error) {
+                    value.persistenceFailures += 1
+                    throw error
+                }
             }
+            value.pending.removeAll { $0.id == id }
+            value.dirty.remove(id)
+            if value.activeID == id { value.activeID = nil }
         }
     }
 
@@ -127,13 +137,13 @@ final class TelemetryQueue: Sendable {
     }
 
     private func readBatches(state value: inout State) throws -> [Batch] {
-        guard FileManager.default.fileExists(atPath: storeDirectory.path) else { return [] }
         let files: [URL]
         do {
             files = try FileManager.default.contentsOfDirectory(
                 at: storeDirectory, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles
             ).filter { $0.pathExtension == "json" }
         } catch {
+            if isNotFound(error) { return [] }
             value.persistenceFailures += 1
             throw error
         }
@@ -154,5 +164,18 @@ final class TelemetryQueue: Sendable {
 
     private func creationDate(of url: URL) -> Date {
         (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? .distantPast
+    }
+
+    private func isNotFound(_ error: Error) -> Bool {
+        let error = error as NSError
+        // Prefer the underlying errno: Cocoa can also wrap ENOTDIR as "no such file".
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isNotFound(underlying)
+        }
+        if error.domain == NSPOSIXErrorDomain {
+            return error.code == Int(POSIXErrorCode.ENOENT.rawValue)
+        }
+        return error.domain == NSCocoaErrorDomain
+            && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(error.code)
     }
 }

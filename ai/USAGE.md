@@ -22,5 +22,7 @@ health/financial content or credentials belong in telemetry.
 The Loki outer push shape is shared, but Swift event lines are plain/sorted
 key=value text while the log sink uses JSON. No unified inner event schema is
 implemented. Flush is not an end-to-end receipt; unreleased synchronous enqueue
-blocks on storage and does not guarantee survival when persistence fails. See the source-backed contract for
+blocks on storage and does not guarantee survival when persistence fails.
+Internal batch rotation bounds rewrite growth, not retention; directory-read
+failure does not prevent attempts to send retained memory events. See the source-backed contract for
 retry/persistence/loss limits and receiver-specific authentication cautions.

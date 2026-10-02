@@ -6,6 +6,9 @@
   in memory and expose cumulative per-instance `persistenceFailureCount`.
 - Snapshot batches for serial retry and delete only after successful transport;
   concurrent enqueue/flush cannot clear a newer batch.
+- Rotate internal batches without eviction to bound per-enqueue rewrite growth;
+  retain memory delivery during directory-read failure and count inaccessible
+  stores/removals instead of treating them as missing.
 - Keep existing public signatures and legacy JSON batch compatibility. Storage
   I/O now blocks `track`; no disk limit, overflow policy, release or lossless
   delivery guarantee is introduced.
