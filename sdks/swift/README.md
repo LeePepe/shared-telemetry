@@ -75,12 +75,26 @@ configuration and observability work. Generic `TelemetryEvent.properties` do
 unfiltered public data-export path. No consumer rollout is established here.
 
 The core takes an explicit HTTPS container URL, create-only container service SAS
-query, app/build/install ID and instance-owned `URLSession`. It reads no environment,
+query and app/build/install ID. It reads no environment,
 plist, Keychain or build secrets. Stored-policy SAS (`si`, without `sp`) is supported;
 explicit `sp`, when present, must be `c`. The caller owns the policy's actual
-permissions and consent. Redirects and non-server-trust authentication challenges
-are refused. No payload, SAS URL or server error body is logged or included in
-transport errors.
+permissions and consent. The transport creates its own ephemeral `URLSession` for
+each flush and invalidates it on exit, including failure and cancellation. It
+never borrows a caller's session/delegate, credential store, cookies, additional
+headers, cache or proxy configuration. Credential/cookie stores and caching are
+disabled; redirects and non-server-trust authentication challenges are refused at
+both the session (NTLM, Negotiate, client certificate) and task levels. Server trust
+uses system default TLS validation, without supplying credentials or accepting
+certificates itself. No payload, SAS URL or server error body is logged or included
+in transport errors.
+
+The internal `configuration` argument is only a source of `protocolClasses` for
+isolated tests; all other settings are ignored, and the protocol list is captured
+at construction. Injected protocols are trusted code capable of observing requests,
+not a sandbox for untrusted networking extensions. Callers cannot use this seam to
+replace the transport's authentication delegate. Synthetic tests verify Foundation
+challenge routing, request isolation and the default-trust disposition; they do not
+establish a real TLS handshake or live Azure acceptance.
 
 Each request is `PUT` with `x-ms-blob-type: BlockBlob`, `If-None-Match: *`,
 `Content-Type: application/x-ndjson` and `Content-Encoding: gzip`. The system zlib

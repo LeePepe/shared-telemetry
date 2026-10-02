@@ -22,7 +22,7 @@ final class AzureBlobTransportTests: XCTestCase {
     private func transport(build: String = "test build+1", now: Date = Date(timeIntervalSince1970: 1_700_000_000)) throws -> AzureBlobTransport {
         try AzureBlobTransport(containerURL: http.container, sasQuery: "sv=2023-11-03&sr=c&si=synthetic&sig=fake%2Bonly%2F%3D",
             app: "sample", build: build, installID: UUID(uuidString: "00000000-0000-4000-8000-000000000001")!,
-            session: http.session, now: { now })
+            configuration: http.session.configuration, now: { now })
     }
 
     func testPutBlockBlobHasEncodedPathHeadersAndGzipNDJSONThenAcknowledges201() async throws {
@@ -84,16 +84,16 @@ final class AzureBlobTransportTests: XCTestCase {
                          "https://example.invalid/container?sig=fake", "https://example.invalid/container#fragment",
                          "https://example.invalid/container/extra", "https://example.invalid/%63ontainer"] {
             XCTAssertThrowsError(try AzureBlobTransport(containerURL: XCTUnwrap(URL(string: endpoint)),
-                sasQuery: "sr=c&sig=fake", app: "sample", build: "1", installID: UUID(), session: http.session))
+                sasQuery: "sr=c&sig=fake", app: "sample", build: "1", installID: UUID(), configuration: http.session.configuration))
         }
         for query in ["sig=fake%ZZ&sr=c", "sr=c&sig=fake value", "sr=c&sig=fake#fragment", "sr=c&sig=fake\n",
                       "sr=c&sig=", "sr=c&sig=fake&sig=other", "sr=c&sig=fake&comp=block", "sr=c&sp=w&sig=fake"] {
             XCTAssertThrowsError(try AzureBlobTransport(containerURL: http.container,
-                sasQuery: query, app: "sample", build: "1", installID: UUID(), session: http.session))
+                sasQuery: query, app: "sample", build: "1", installID: UUID(), configuration: http.session.configuration))
         }
         for segment in ["", ".", "..", "a/b", "a\\b", "line\nbreak"] {
             XCTAssertThrowsError(try AzureBlobTransport(containerURL: http.container,
-                sasQuery: "sr=c&sig=fake", app: segment, build: "1", installID: UUID(), session: http.session))
+                sasQuery: "sr=c&sig=fake", app: segment, build: "1", installID: UUID(), configuration: http.session.configuration))
         }
         XCTAssertTrue(http.requests.isEmpty)
     }
@@ -165,7 +165,7 @@ final class AzureBlobTransportTests: XCTestCase {
         let other = BlobHTTPFixture()
         defer { other.close() }
         let changed = try AzureBlobTransport(containerURL: other.container, sasQuery: "sr=c&sig=other-fake",
-            app: "new-app", build: "2", installID: UUID(), session: other.session)
+            app: "new-app", build: "2", installID: UUID(), configuration: other.session.configuration)
         do { try await changed.flush(TelemetryQueue(storeDirectory: directory)); XCTFail("Destination changed") }
         catch { XCTAssertEqual(error as? AzureBlobError, .destinationChanged) }
         XCTAssertTrue(other.requests.isEmpty)
@@ -359,7 +359,7 @@ final class AzureBlobTransportTests: XCTestCase {
         XCTAssertTrue(first.url!.absoluteString.contains("%E8%B7%AF%E5%BE%84%20%23%2B%3F%25"))
         http.state.withLock { $0.error = nil; $0.status = 403; $0.headers = ["x-ms-error-code": "UnauthorizedBlobOverwrite"] }
         let changed = try AzureBlobTransport(containerURL: http.container, sasQuery: "?sr=c&sp=c&sig=rotated-fake",
-            app: "new-app", build: "new-build", installID: UUID(), session: http.session)
+            app: "new-app", build: "new-build", installID: UUID(), configuration: http.session.configuration)
         try await changed.flush(TelemetryQueue(storeDirectory: directory))
         XCTAssertEqual(http.requests.last?.url?.path, first.url?.path)
         XCTAssertEqual(http.requests.last?.url?.query, "sr=c&sp=c&sig=rotated-fake")
@@ -420,7 +420,7 @@ final class AzureBlobTransportTests: XCTestCase {
         }
         let sender = try AzureBlobTransport(containerURL: fixture.container,
             sasQuery: "sv=2023-11-03&sr=c&si=synthetic&sig=fake%2Bonly%2F%3D", app: "sample", build: "before-kill",
-            installID: UUID(), session: fixture.session)
+            installID: UUID(), configuration: fixture.session.configuration)
         try await sender.flush(queue)
         XCTFail("Process should have been killed in mocked upload")
     }

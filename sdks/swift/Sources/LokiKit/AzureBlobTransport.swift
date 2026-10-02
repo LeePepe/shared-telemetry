@@ -7,11 +7,11 @@ struct AzureBlobTransport: Sendable {
     private let containerURL: URL
     private let sasQuery: String
     private let prefix: [String]
-    private let session: URLSession
+    private let protocolClasses: [AnyClass]?
     private let now: @Sendable () -> Date
 
     init(containerURL: URL, sasQuery: String, app: String, build: String, installID: UUID,
-         session: URLSession, now: @escaping @Sendable () -> Date = { Date() }) throws {
+         configuration: URLSessionConfiguration = .ephemeral, now: @escaping @Sendable () -> Date = { Date() }) throws {
         guard let url = URLComponents(url: containerURL, resolvingAgainstBaseURL: false),
               url.scheme == "https", url.host != nil, url.user == nil, url.password == nil,
               url.query == nil, url.fragment == nil,
@@ -23,13 +23,28 @@ struct AzureBlobTransport: Sendable {
         self.containerURL = containerURL
         self.sasQuery = sasQuery.hasPrefix("?") ? String(sasQuery.dropFirst()) : sasQuery
         self.prefix = [app, build, installID.uuidString.lowercased()]
-        self.session = session
+        // Only trusted protocol injection crosses this internal test seam. Never
+        // inherit a caller's delegate, credential/cookie stores, headers or proxies.
+        self.protocolClasses = configuration.protocolClasses
         self.now = now
     }
 
     func flush(_ queue: TelemetryQueue) async throws {
         guard queue.beginFlush() else { return }
         defer { queue.endFlush() }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = protocolClasses
+        configuration.urlCredentialStorage = nil
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpAdditionalHeaders = nil
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let session = URLSession(configuration: configuration, delegate: BlobRequestDelegate(), delegateQueue: nil)
+        // Reuse connections only within this flush; release session/delegate resources
+        // on success, storage/network failure and cancellation, with no caller lifecycle.
+        defer { session.invalidateAndCancel() }
         for batch in try queue.batchesForFlush() {
             let source = try Self.ndjson(batch.events)
             var prepared: AzureBlobBatch
@@ -54,7 +69,7 @@ struct AzureBlobTransport: Sendable {
                 prepared.mayHaveBeenSent = true
                 try prepared.save(queue: queue)
             }
-            let reply = try await put(prepared.body, path: prepared.path)
+            let reply = try await put(prepared.body, path: prepared.path, session: session)
             let overwrite = reply.status == 403 && reply.code == "UnauthorizedBlobOverwrite"
             guard reply.status == 201 || (retransmission && overwrite) else {
                 if !retransmission && reply.status < 500 {
@@ -72,7 +87,7 @@ struct AzureBlobTransport: Sendable {
         }
     }
 
-    private func put(_ body: Data, path: [String]) async throws -> (status: Int, code: String?) {
+    private func put(_ body: Data, path: [String], session: URLSession) async throws -> (status: Int, code: String?) {
         var url = URLComponents(url: containerURL, resolvingAgainstBaseURL: false)!
         let safe = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
         url.percentEncodedPath = url.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -95,7 +110,7 @@ struct AzureBlobTransport: Sendable {
         request.setValue("*", forHTTPHeaderField: "If-None-Match")
         let response: URLResponse
         do {
-            (_, response) = try await session.data(for: request, delegate: BlobRequestDelegate())
+            (_, response) = try await session.data(for: request)
         } catch {
             // URLSession errors can embed the SAS URL. Never propagate it or response bodies.
             throw AzureBlobError.networkFailure
@@ -195,7 +210,7 @@ enum AzureBlobError: Error, Equatable {
     case httpFailure(Int)
 }
 
-// Per-request redirect/auth behavior, including when a caller supplies a session.
+// The owned session uses this delegate for BOTH connection- and task-level policy.
 final class BlobRequestDelegate: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
@@ -203,8 +218,18 @@ final class BlobRequestDelegate: NSObject, URLSessionTaskDelegate, Sendable {
         completionHandler(nil)
     }
 
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        respond(to: challenge, completionHandler: completionHandler)
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        respond(to: challenge, completionHandler: completionHandler)
+    }
+
+    private func respond(to challenge: URLAuthenticationChallenge,
+                         completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         completionHandler(challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust
                           ? .performDefaultHandling : .cancelAuthenticationChallenge, nil)
     }
