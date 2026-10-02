@@ -30,6 +30,9 @@ final class TelemetryQueue: Sendable {
 
     var persistenceFailureCount: Int { state.withLock { $0.persistenceFailures } }
 
+    // Transport-owned durable receipt files participate in the same operation counter.
+    func recordPersistenceFailure() { state.withLock { $0.persistenceFailures += 1 } }
+
     func enqueue(_ event: TelemetryEvent) {
         state.withLock { value in
             if value.activeID == nil {

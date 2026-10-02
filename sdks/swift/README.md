@@ -65,6 +65,61 @@ The disk format remains UUID-named JSON arrays using the existing ISO-8601 dates
 
 The shipper sets a ten-second request timeout and accepts HTTP 2xx. It groups streams by event name; lines contain the name when properties are empty, otherwise sorted `key=value` text. This is not the Web/Python JSON envelope.
 
+## Unreleased internal Azure Blob transport core
+
+`AzureBlobTransport` is **internal**, not a new public `TelemetryService` or a
+released consumer entry point. Loki APIs, defaults and wire bytes are unchanged.
+Public Blob wiring remains dependent on separately reviewed event privacy,
+configuration and observability work. Generic `TelemetryEvent.properties` do
+**not** inherit `LokiLogSink` filtering; this core must not be exposed as an
+unfiltered public data-export path. No consumer rollout is established here.
+
+The core takes an explicit HTTPS container URL, create-only container service SAS
+query, app/build/install ID and instance-owned `URLSession`. It reads no environment,
+plist, Keychain or build secrets. Stored-policy SAS (`si`, without `sp`) is supported;
+explicit `sp`, when present, must be `c`. The caller owns the policy's actual
+permissions and consent. Redirects and non-server-trust authentication challenges
+are refused. No payload, SAS URL or server error body is logged or included in
+transport errors.
+
+Each request is `PUT` with `x-ms-blob-type: BlockBlob`, `If-None-Match: *`,
+`Content-Type: application/x-ndjson` and `Content-Encoding: gzip`. The system zlib
+produces the gzip stream; no new package dependency is required. Each NDJSON line
+contains the existing event's `name`, `properties` and ISO8601 `timestamp`, with a
+final newline. Blob timestamps use the legacy queue's whole-second precision from
+the first send; live Loki timestamps retain their existing precision.
+
+Before the first request, the full queue batch must be durable. A checksummed
+`<queue-id>.azure-blob` sidecar freezes the exact compressed bytes, source digest,
+destination and `<app>/<build>/<yyyy-mm-dd>/<install-id>/<batch-uuid>.ndjson.gz`
+path, using UTC at preparation and a fresh upload UUID. It contains no SAS. Retries
+and restarts use those bytes, not recompression or current build/clock/install
+values. A changed container or mismatched/corrupt source record blocks that batch;
+it cannot redirect old data using new credentials. SAS rotation for the same
+container is possible without changing batch identity. One live owner per store
+directory remains required; do not share the directory with concurrent Loki/Blob
+instances, edit journals or mix copied queue files from different stores.
+
+Only HTTP201, or a validated retransmission returning HTTP403 with exactly
+`x-ms-error-code: UnauthorizedBlobOverwrite`, permits queue removal. The latter
+relies on the durable immutable request, exclusive ownership of the upload
+namespace and a previously unresolved attempt (including termination during the
+request); it is not a remote content-hash readback. A first overwrite rejection is
+not acknowledged, even on repeated definitive retries. Other 403/409 responses,
+missing/unknown error codes and network ambiguity retain pending work. A failed
+write-ahead record prevents sending; storage failures use the existing queue
+counter. This is not an exactly-once or absolute no-loss guarantee.
+
+Legacy UUID JSON event arrays stay readable without migration; older Loki code
+ignores sidecars and can still replay those arrays, with its existing duplicate
+risks. Retain unsent files when rolling back. Removal happens source-first only
+after confirmed delivery; interruption or sidecar-removal failure at that point
+can leave an inert sidecar, never deletion of unconfirmed source data. Automatic
+orphan cleanup, disk caps, oversized-event eviction, heartbeat/disabled reporting,
+public privacy filtering, release packaging and real consumer acceptance are not
+implemented by this slice. The current encoder retains data and fails preparation
+if a single NDJSON body exceeds zlib's 32-bit input range; it does not evict events.
+
 ## Console logging and remote log mirror
 
 Illustrative/source-reviewed, not executed; local logging only unless a remote sink has already been configured elsewhere in the process:
