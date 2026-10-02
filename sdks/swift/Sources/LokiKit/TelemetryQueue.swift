@@ -1,100 +1,182 @@
 import Foundation
+import Synchronization
 
-/// 离线遥测事件队列
-///
-/// 在内存中缓存事件，支持持久化到磁盘（离线时保存，联网后重发）。
-/// 使用 actor 保证线程安全。
-actor TelemetryQueue {
+/// A single-owner store. Synchronous enqueue closes the track-to-flush crash window.
+/// Files retain the legacy UUID + JSON event-array format for rollback compatibility.
+final class TelemetryQueue: Sendable {
+    typealias Batch = (id: UUID, events: [TelemetryEvent])
 
-    // MARK: - Properties
+    private struct State {
+        // Keep originals (including timestamp precision) and failed writes until delivery.
+        var pending: [Batch] = []
+        var activeID: UUID?
+        var dirty: Set<UUID> = []
+        var persistenceFailures = 0
+        var flushing = false
+    }
 
-    private var pending: [TelemetryEvent] = []
-
-    /// 磁盘持久化目录（let 常量可从 nonisolated 上下文访问）
+    private let state = Mutex(State())
+    // Bound rewrite work, not retention: full batches stay queued until acknowledged.
+    private static let eventsPerBatch = 64
     let storeDirectory: URL
 
-    // MARK: - Init
-
     init(storeDirectory: URL? = nil) {
-        if let dir = storeDirectory {
-            self.storeDirectory = dir
-        } else {
-            let appSupport = FileManager.default.urls(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask
-            ).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
-            self.storeDirectory = appSupport
-                .appendingPathComponent("telemetry/pending", isDirectory: true)
-        }
-        // 目录不存在时创建（let 常量已初始化，可安全访问）
-        try? FileManager.default.createDirectory(
-            at: self.storeDirectory,
-            withIntermediateDirectories: true
-        )
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        self.storeDirectory = storeDirectory ?? appSupport
+            .appendingPathComponent("telemetry/pending", isDirectory: true)
     }
 
-    // MARK: - In-memory operations
+    var persistenceFailureCount: Int { state.withLock { $0.persistenceFailures } }
 
     func enqueue(_ event: TelemetryEvent) {
-        pending.append(event)
+        state.withLock { value in
+            if value.activeID == nil {
+                let id = UUID()
+                value.activeID = id
+                value.pending.append((id, []))
+            }
+            // The active batch is always last; enqueue does not scan the backlog.
+            let index = value.pending.count - 1
+            let id = value.pending[index].id
+            value.pending[index].events.append(event)
+            if value.pending[index].events.count == Self.eventsPerBatch {
+                value.activeID = nil
+            }
+            value.dirty.insert(id)
+            let batch = value.pending[index]
+            do {
+                try writeBatch(id: batch.id, events: batch.events)
+                value.dirty.remove(id)
+            } catch {
+                value.persistenceFailures += 1
+            }
+        }
     }
 
-    /// 取出所有待发送事件并清空内存缓冲
-    func takePendingEvents() -> [TelemetryEvent] {
-        let events = pending
-        pending = []
-        return events
+    func beginFlush() -> Bool {
+        state.withLock { value in
+            guard !value.flushing else { return false }
+            value.flushing = true
+            return true
+        }
     }
 
-    var pendingCount: Int { pending.count }
+    func endFlush() { state.withLock { $0.flushing = false } }
 
-    // MARK: - Disk persistence
+    /// A snapshot, never a destructive take. Enqueues during transport belong to a later flush.
+    func batchesForFlush() throws -> [Batch] {
+        state.withLock { value in
+            // Freeze file contents before transport; concurrent tracks start a new batch.
+            value.activeID = nil
+            for batch in value.pending where value.dirty.contains(batch.id) {
+                do {
+                    try writeBatch(id: batch.id, events: batch.events)
+                    value.dirty.remove(batch.id)
+                } catch {
+                    value.persistenceFailures += 1
+                }
+            }
+            let stored: [Batch]
+            do {
+                stored = try readBatches(state: &value)
+            } catch {
+                // The read already counted its failure. Storage unavailability must not
+                // prevent transport from delivering the retained memory originals.
+                return value.pending
+            }
+            // Replay recovered history first, then live batches in enqueue order.
+            // Atomic retries can refresh file dates; they must not reorder known IDs
+            // or replace originals with a persisted prefix after a failed rewrite.
+            let pendingIDs = Set(value.pending.map(\.id))
+            return stored.filter { !pendingIDs.contains($0.id) } + value.pending
+        }
+    }
 
-    /// 将一批事件持久化到磁盘（网络不可用时调用）
     func persistBatch(id: UUID, events: [TelemetryEvent]) throws {
+        try state.withLock { value in
+            do {
+                try writeBatch(id: id, events: events)
+            } catch {
+                value.persistenceFailures += 1
+                throw error
+            }
+        }
+    }
+
+    func loadPersistedBatches() throws -> [Batch] {
+        try state.withLock { try readBatches(state: &$0) }
+    }
+
+    /// Only called after confirmed transport success. Failed removal remains retryable.
+    func removeBatch(id: UUID) throws {
+        try state.withLock { value in
+            do {
+                try FileManager.default.removeItem(at: file(id))
+            } catch {
+                if !isNotFound(error) {
+                    value.persistenceFailures += 1
+                    throw error
+                }
+            }
+            value.pending.removeAll { $0.id == id }
+            value.dirty.remove(id)
+            if value.activeID == id { value.activeID = nil }
+        }
+    }
+
+    private func file(_ id: UUID) -> URL {
+        storeDirectory.appendingPathComponent("\(id.uuidString).json")
+    }
+
+    private func writeBatch(id: UUID, events: [TelemetryEvent]) throws {
+        try FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(events)
-        let file = storeDirectory.appendingPathComponent("\(id.uuidString).json")
-        try data.write(to: file, options: .atomic)
+        try encoder.encode(events).write(to: file(id), options: .atomic)
     }
 
-    /// 加载磁盘上所有未发送的批次，按文件创建时间升序排列
-    func loadPersistedBatches() throws -> [(id: UUID, events: [TelemetryEvent])] {
-        guard FileManager.default.fileExists(atPath: storeDirectory.path) else {
-            return []
+    private func readBatches(state value: inout State) throws -> [Batch] {
+        let files: [URL]
+        do {
+            files = try FileManager.default.contentsOfDirectory(
+                at: storeDirectory, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles
+            ).filter { $0.pathExtension == "json" }
+        } catch {
+            if isNotFound(error) { return [] }
+            value.persistenceFailures += 1
+            throw error
         }
-        let files = try FileManager.default.contentsOfDirectory(
-            at: storeDirectory,
-            includingPropertiesForKeys: [.creationDateKey],
-            options: .skipsHiddenFiles
-        ).filter { $0.pathExtension == "json" }
-
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-
-        return files
-            .sorted { creationDate(of: $0) < creationDate(of: $1) }
-            .compactMap { url -> (UUID, [TelemetryEvent])? in
-                let name = url.deletingPathExtension().lastPathComponent
-                guard let uuid = UUID(uuidString: name),
-                      let data = try? Data(contentsOf: url),
-                      let events = try? decoder.decode([TelemetryEvent].self, from: data)
-                else { return nil }
-                return (uuid, events)
+        var batches: [Batch] = []
+        for url in files.sorted(by: { creationDate(of: $0) < creationDate(of: $1) }) {
+            guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent) else { continue }
+            do {
+                batches.append((id, try decoder.decode([TelemetryEvent].self, from: Data(contentsOf: url))))
+            } catch {
+                // Preserve unreadable files; count each failed read attempt without leaking payloads.
+                value.persistenceFailures += 1
             }
+        }
+        return batches
     }
-
-    /// 删除已成功发送的批次
-    func removeBatch(id: UUID) throws {
-        let file = storeDirectory.appendingPathComponent("\(id.uuidString).json")
-        guard FileManager.default.fileExists(atPath: file.path) else { return }
-        try FileManager.default.removeItem(at: file)
-    }
-
-    // MARK: - Private
 
     private func creationDate(of url: URL) -> Date {
         (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? .distantPast
+    }
+
+    private func isNotFound(_ error: Error) -> Bool {
+        let error = error as NSError
+        // Prefer the underlying errno: Cocoa can also wrap ENOTDIR as "no such file".
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isNotFound(underlying)
+        }
+        if error.domain == NSPOSIXErrorDomain {
+            return error.code == Int(POSIXErrorCode.ENOENT.rawValue)
+        }
+        return error.domain == NSCocoaErrorDomain
+            && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(error.code)
     }
 }

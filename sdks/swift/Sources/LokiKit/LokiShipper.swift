@@ -8,10 +8,12 @@ struct LokiShipper: Sendable {
 
     let endpoint: URL
     let headers: [String: String]
+    let session: URLSession
 
-    init(endpoint: URL, headers: [String: String] = [:]) {
+    init(endpoint: URL, headers: [String: String] = [:], session: URLSession = .shared) {
         self.endpoint = endpoint
         self.headers = headers
+        self.session = session
     }
 
     /// 将事件批次推送到 Loki
@@ -33,7 +35,7 @@ struct LokiShipper: Sendable {
         }
         request.httpBody = body
 
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (_, response) = try await session.data(for: request)
 
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
