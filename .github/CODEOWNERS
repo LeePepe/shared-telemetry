@@ -22,4 +22,7 @@
 # shared-telemetry-specific important paths
 /scripts/ci/                      @LeePepe
 /sdks/swift/Sources/LokiKit/LokiLogSink.swift  @LeePepe
+/sdks/swift/Sources/LokiKit/AzureBlobTransport.swift  @LeePepe
+/sdks/swift/Sources/LokiKit/AzureBlobBatch.swift  @LeePepe
+/sdks/swift/Sources/LokiKit/AzureBlobPrivacyPolicy.swift  @LeePepe
 /stack/.env.example               @LeePepe
