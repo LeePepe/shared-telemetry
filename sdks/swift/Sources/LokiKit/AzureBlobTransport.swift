@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import zlib
 
 /// Internal, default-deny transport core. Product-owned rules are explicit;
@@ -44,7 +45,8 @@ struct AzureBlobTransport: Sendable {
         configuration.httpAdditionalHeaders = nil
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        let session = URLSession(configuration: configuration, delegate: BlobRequestDelegate(), delegateQueue: nil)
+        let responseDelegate = BlobRequestDelegate()
+        let session = URLSession(configuration: configuration, delegate: responseDelegate, delegateQueue: nil)
         // Reuse connections only within this flush; release session/delegate resources
         // on success, storage/network failure and cancellation, with no caller lifecycle.
         defer { session.invalidateAndCancel() }
@@ -82,7 +84,7 @@ struct AzureBlobTransport: Sendable {
                 prepared.mayHaveBeenSent = true
                 try prepared.save(queue: queue)
             }
-            let reply = try await put(prepared.body, path: prepared.path, session: session)
+            let reply = try await put(prepared.body, path: prepared.path, session: session, responseDelegate: responseDelegate)
             let overwrite = reply.status == 403 && reply.code == "UnauthorizedBlobOverwrite"
             guard reply.status == 201 || (retransmission && overwrite) else {
                 if !retransmission && reply.status < 500 {
@@ -100,7 +102,8 @@ struct AzureBlobTransport: Sendable {
         }
     }
 
-    private func put(_ body: Data, path: [String], session: URLSession) async throws -> (status: Int, code: String?) {
+    private func put(_ body: Data, path: [String], session: URLSession,
+                     responseDelegate: BlobRequestDelegate) async throws -> (status: Int, code: String?) {
         var url = URLComponents(url: containerURL, resolvingAgainstBaseURL: false)!
         let safe = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
         url.percentEncodedPath = url.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -121,17 +124,18 @@ struct AzureBlobTransport: Sendable {
         request.setValue("gzip", forHTTPHeaderField: "Content-Encoding")
         request.setValue(String(body.count), forHTTPHeaderField: "Content-Length")
         request.setValue("*", forHTTPHeaderField: "If-None-Match")
-        let response: URLResponse
         do {
-            (_, response) = try await session.data(for: request)
+            let reply = try await responseDelegate.response(for: request, using: session)
+            // Cancellation after completion but before the async handoff is also
+            // conservative: retain the batch rather than acknowledge cancelled work.
+            try Task.checkCancellation()
+            return reply
+        } catch let error as AzureBlobError {
+            throw error
         } catch {
             // URLSession errors can embed the SAS URL. Never propagate it or response bodies.
             throw AzureBlobError.networkFailure
         }
-        guard let http = response as? HTTPURLResponse, http.url == endpoint else {
-            throw AzureBlobError.invalidResponse
-        }
-        return (http.statusCode, http.value(forHTTPHeaderField: "x-ms-error-code"))
     }
 
     private static func validSegment(_ value: String) -> Bool {
@@ -261,7 +265,98 @@ enum AzureBlobError: Error, Equatable {
 }
 
 // The owned session uses this delegate for BOTH connection- and task-level policy.
-final class BlobRequestDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+final class BlobRequestDelegate: NSObject, URLSessionDataDelegate, Sendable {
+    typealias Response = (status: Int, code: String?)
+
+    private struct Pending {
+        let task: URLSessionDataTask
+        var continuation: CheckedContinuation<Response, any Error>?
+        var response: Response?
+        var cancelled = false
+    }
+
+    // flush sends sequentially. Retain one task/continuation and fixed-size receipt
+    // metadata, never a response body, untrusted error string, or response history.
+    private let pending = Mutex<Pending?>(nil)
+
+    func response(for request: URLRequest, using session: URLSession) async throws -> Response {
+        let task = session.dataTask(with: request) // No completion-handler aggregation.
+        pending.withLock {
+            precondition($0 == nil, "Blob requests must be sequential")
+            $0 = Pending(task: task)
+        }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let start = pending.withLock { value in
+                    guard var current = value, !current.cancelled else {
+                        value = nil
+                        return false
+                    }
+                    current.continuation = continuation
+                    value = current
+                    return true
+                }
+                if start {
+                    task.resume()
+                } else {
+                    task.cancel()
+                    continuation.resume(throwing: AzureBlobError.networkFailure)
+                }
+            }
+        } onCancel: {
+            let continuation = self.pending.withLock { value -> CheckedContinuation<Response, any Error>? in
+                guard var current = value, current.task === task else { return nil }
+                if let continuation = current.continuation {
+                    value = nil
+                    return continuation
+                }
+                // Cancellation can arrive before the continuation is installed.
+                current.cancelled = true
+                value = current
+                return nil
+            }
+            if let continuation {
+                task.cancel()
+                continuation.resume(throwing: AzureBlobError.networkFailure)
+            }
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void) {
+        pending.withLock { value in
+            guard value?.task === dataTask else { return }
+            if let http = response as? HTTPURLResponse, http.url == dataTask.originalRequest?.url {
+                // Only this exact code participates in receipts; do not retain
+                // arbitrary headers/error bodies from a failed request.
+                let overwrite = http.value(forHTTPHeaderField: "x-ms-error-code") == "UnauthorizedBlobOverwrite"
+                value?.response = (http.statusCode, overwrite ? "UnauthorizedBlobOverwrite" : nil)
+            } else {
+                value?.response = nil
+            }
+        }
+        completionHandler(.allow) // Drain to terminal completion; headers alone are not a receipt.
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        // Streaming discard: no buffering, file output, logging or intentional cancellation.
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        let completion = pending.withLock { value -> (CheckedContinuation<Response, any Error>, Result<Response, any Error>)? in
+            guard let current = value, current.task === task, let continuation = current.continuation else { return nil }
+            value = nil
+            if error != nil || current.cancelled {
+                return (continuation, .failure(AzureBlobError.networkFailure))
+            }
+            guard let response = current.response else {
+                return (continuation, .failure(AzureBlobError.invalidResponse))
+            }
+            return (continuation, .success(response))
+        }
+        if let (continuation, result) = completion { continuation.resume(with: result) }
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
                     completionHandler: @escaping @Sendable (URLRequest?) -> Void) {

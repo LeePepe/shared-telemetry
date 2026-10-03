@@ -128,6 +128,18 @@ uses system default TLS validation, without supplying credentials or accepting
 certificates itself. No payload, SAS URL or server error body is logged or included
 in transport errors.
 
+Response bodies are streamed to a discard-only data delegate, never aggregated,
+written to disk, logged or copied into errors/journals. Only the HTTP status and
+whether the exact overwrite code matched are retained by the receipt handler.
+Headers alone do not acknowledge delivery: successful terminal task completion is
+required, and a later network error or cancellation keeps the batch pending even
+after 201/overwrite headers. No intentional header-only cancellation, response
+size policy or queue-capacity policy is introduced. Cancellation and completion
+atomically take a single continuation; a cancelled flush releases its task/session
+and later flushes can retry normally. Existing request timeouts remain unchanged;
+this bounds application-retained response state, not total network traffic or
+every transient buffer inside Foundation.
+
 The internal `configuration` argument is only a source of `protocolClasses` for
 isolated tests; all other settings are ignored, and the protocol list is captured
 at construction. Injected protocols are trusted code capable of observing requests,

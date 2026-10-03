@@ -2,6 +2,9 @@ import Foundation
 import Synchronization
 import XCTest
 import zlib
+#if os(macOS)
+import Darwin
+#endif
 @testable import LokiKit
 
 final class AzureBlobTransportTests: XCTestCase {
@@ -78,6 +81,196 @@ final class AzureBlobTransportTests: XCTestCase {
     private func storedBytes() throws -> [String: Data] {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         return try Dictionary(uniqueKeysWithValues: files.map { ($0.lastPathComponent, try Data(contentsOf: $0)) })
+    }
+
+#if os(macOS)
+    func testResponseChunksDoNotAccumulateBeforeTerminalNetworkFailure() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        queue.enqueue(TelemetryEvent(name: "synthetic.first", properties: ["count": "1"]))
+        let entered = expectation(description: "bounded synthetic response delivered")
+        let sampled = Mutex<(growth: Int, sent: Int)?>(nil)
+        http.state.withLock { state in
+            state.response = { protocolInstance in
+                let response = HTTPURLResponse(url: protocolInstance.request.url!, statusCode: 201,
+                    httpVersion: "HTTP/1.1", headerFields: nil)!
+                protocolInstance.client?.urlProtocol(protocolInstance, didReceive: response, cacheStoragePolicy: .notAllowed)
+                let baseline = responseHeapBytes()
+                // Fixed 32 MiB total, one 64 KiB fixture chunk at a time. No real
+                // endpoint, unlimited allocation or memory-limit policy is involved.
+                protocolInstance.sendMeasuredChunks(remaining: 512, baseline: baseline) { growth, sent in
+                    sampled.withLock { $0 = (growth, sent) }
+                    entered.fulfill()
+                    protocolInstance.client?.urlProtocol(protocolInstance, didFailWithError: URLError(.networkConnectionLost))
+                }
+            }
+        }
+        let sender = try transport()
+        let sending = Task { try await sender.flush(queue) }
+        defer { sending.cancel() }
+        await fulfillment(of: [entered], timeout: 8)
+        do { try await sending.value; XCTFail("201 headers cannot hide a terminal network error") }
+        catch { XCTAssertEqual(error as? AzureBlobError, .networkFailure) }
+        let measurement = try XCTUnwrap(sampled.withLock { $0 })
+        XCTAssertEqual(measurement.sent, 32 * 1_024 * 1_024)
+        print("RESPONSE_BODY_HEAP growth=\(measurement.growth) sent=\(measurement.sent)")
+        XCTAssertLessThan(measurement.growth, measurement.sent / 2,
+                          "Response bytes must not be retained as an aggregate while awaiting completion")
+        XCTAssertEqual(try queue.batchesForFlush().flatMap(\.events).count, 1)
+    }
+#endif
+
+    func testStreamedResponseBodiesPreserve201AndExactOverwriteClassification() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        queue.enqueue(TelemetryEvent(name: "synthetic.first", properties: ["count": "1"]))
+        let sender = try transport()
+        http.state.withLock { $0.response = { $0.sendResponseChunks(status: 201) } }
+        try await sender.flush(queue)
+        XCTAssertTrue(try queue.batchesForFlush().isEmpty)
+
+        queue.enqueue(TelemetryEvent(name: "synthetic.retry", properties: ["count": "2"]))
+        http.state.withLock { $0.response = nil; $0.error = URLError(.timedOut) }
+        do { try await sender.flush(queue); XCTFail("Unconfirmed upload") }
+        catch { XCTAssertEqual(error as? AzureBlobError, .networkFailure) }
+        let original = try XCTUnwrap(http.requests.last)
+        let frozen = try storedBytes()
+        let refusals: [(Int, String?)] = [(403, nil), (403, "AuthenticationFailed"), (403, "synthetic-unknown-CANARY"),
+            (409, "UnauthorizedBlobOverwrite"), (200, nil), (503, nil)]
+        for (status, code) in refusals {
+            http.state.withLock { $0.error = nil; $0.response = { $0.sendResponseChunks(status: status, code: code) } }
+            do { try await sender.flush(queue); XCTFail("Unconfirmed HTTP response") }
+            catch {
+                XCTAssertEqual(error as? AzureBlobError, .httpFailure(status))
+                XCTAssertFalse(String(describing: error).contains("CANARY"))
+            }
+            XCTAssertEqual(try storedBytes(), frozen, "Response bodies must not enter source/journal files")
+        }
+        http.state.withLock { $0.response = { $0.sendResponseChunks(status: 403, code: "UnauthorizedBlobOverwrite") } }
+        try await sender.flush(queue)
+        XCTAssertTrue(try queue.batchesForFlush().isEmpty)
+        XCTAssertEqual(http.requests.last?.url, original.url)
+        XCTAssertEqual(try requestBody(XCTUnwrap(http.requests.last)), try requestBody(original))
+    }
+
+    func testTerminalResponseErrorsWinOver201AndOverwriteHeaders() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        queue.enqueue(TelemetryEvent(name: "synthetic.first", properties: ["count": "1"]))
+        http.state.withLock { $0.error = URLError(.timedOut) }
+        let sender = try transport()
+        do { try await sender.flush(queue) } catch {}
+        let frozen = try storedBytes()
+        for status in [201, 403] {
+            http.state.withLock { value in
+                value.error = nil
+                value.response = {
+                    $0.sendResponseChunks(status: status, code: "UnauthorizedBlobOverwrite",
+                        error: URLError(.networkConnectionLost, userInfo: [NSURLErrorFailingURLErrorKey:
+                            URL(string: "https://example.invalid/?sig=synthetic-CANARY")!]))
+                }
+            }
+            do { try await sender.flush(queue); XCTFail("Headers alone cannot acknowledge a failed response") }
+            catch { XCTAssertEqual(String(describing: error), "networkFailure") }
+            XCTAssertEqual(try storedBytes(), frozen)
+            XCTAssertEqual(try queue.batchesForFlush().flatMap(\.events).count, 1)
+        }
+    }
+
+    func testInvalidResponseAfterStreamCompletionIsNotAcknowledged() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        queue.enqueue(TelemetryEvent(name: "synthetic.first", properties: ["count": "1"]))
+        let sender = try transport()
+        for foreignURL in [false, true] {
+            http.state.withLock { $0.response = { protocolInstance in
+                let response: URLResponse = foreignURL
+                    ? HTTPURLResponse(url: URL(string: "https://other.example.invalid/container")!,
+                                      statusCode: 201, httpVersion: "HTTP/1.1", headerFields: nil)!
+                    : URLResponse(url: protocolInstance.request.url!, mimeType: "text/plain", expectedContentLength: 32, textEncodingName: nil)
+                protocolInstance.client?.urlProtocol(protocolInstance, didReceive: response, cacheStoragePolicy: .notAllowed)
+                protocolInstance.client?.urlProtocol(protocolInstance, didLoad: Data("synthetic-response-CANARY".utf8))
+                protocolInstance.client?.urlProtocolDidFinishLoading(protocolInstance)
+            } }
+            do { try await sender.flush(queue); XCTFail("Invalid response must be retained") }
+            catch { XCTAssertEqual(error as? AzureBlobError, .invalidResponse) }
+            XCTAssertEqual(try queue.batchesForFlush().flatMap(\.events).count, 1)
+        }
+    }
+
+    func testAlreadyCancelledFlushDoesNotStartRequestAndNextFlushWorks() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        queue.enqueue(TelemetryEvent(name: "synthetic.first", properties: ["count": "1"]))
+        let sender = try transport()
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            do { try await sender.flush(queue); XCTFail("Pre-start cancellation cannot deliver") }
+            catch { XCTAssertEqual(error as? AzureBlobError, .networkFailure) }
+        }
+        await cancelled.value
+        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertEqual(try queue.batchesForFlush().flatMap(\.events).count, 1)
+        try await sender.flush(queue)
+        XCTAssertEqual(http.requests.count, 1)
+        XCTAssertTrue(try queue.batchesForFlush().isEmpty)
+    }
+
+    func testCancellationAfterResponseHeadersAndBodyRetainsFrozenBatch() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory)
+        queue.enqueue(TelemetryEvent(name: "synthetic.first", properties: ["count": "1"]))
+        let sender = try transport()
+        let headers = expectation(description: "headers/body offered, no terminal completion")
+        let stopped = expectation(description: "cancelled protocol stopped")
+        http.state.withLock { value in
+            value.onStop = { stopped.fulfill() }
+            value.response = { protocolInstance in
+                let response = HTTPURLResponse(url: protocolInstance.request.url!, statusCode: 201,
+                    httpVersion: "HTTP/1.1", headerFields: nil)!
+                protocolInstance.client?.urlProtocol(protocolInstance, didReceive: response, cacheStoragePolicy: .notAllowed)
+                protocolInstance.client?.urlProtocol(protocolInstance, didLoad: Data("synthetic-response-CANARY".utf8))
+                headers.fulfill()
+            }
+        }
+        let sending = Task { try await sender.flush(queue) }
+        await fulfillment(of: [headers], timeout: 3)
+        let frozen = try storedBytes()
+        sending.cancel()
+        do { try await sending.value; XCTFail("Cancel is not an intentional successful discard") }
+        catch { XCTAssertEqual(error as? AzureBlobError, .networkFailure) }
+        await fulfillment(of: [stopped], timeout: 3)
+        XCTAssertEqual(try storedBytes(), frozen)
+        http.state.withLock { $0.onStop = nil; $0.response = { $0.sendResponseChunks(status: 403, code: "UnauthorizedBlobOverwrite") } }
+        try await sender.flush(queue)
+        XCTAssertEqual(http.requests.first?.url, http.requests.last?.url)
+        XCTAssertEqual(try requestBody(XCTUnwrap(http.requests.first)), try requestBody(XCTUnwrap(http.requests.last)))
+        XCTAssertTrue(try queue.batchesForFlush().isEmpty)
+    }
+
+    func testCompletionCancellationRaceResumesOnceAndNeverAcknowledgesAnError() async throws {
+        let sender = try transport()
+        for index in 0..<20 {
+            let queue = TelemetryQueue(storeDirectory: directory.appendingPathComponent("race-\(index)"))
+            queue.enqueue(TelemetryEvent(name: "synthetic.first", properties: ["count": "1"]))
+            let ready = expectation(description: "response headers ready \(index)")
+            let failResponse = Mutex<(@Sendable () -> Void)?>(nil)
+            http.state.withLock { $0.response = { protocolInstance in
+                let response = HTTPURLResponse(url: protocolInstance.request.url!, statusCode: 201,
+                    httpVersion: "HTTP/1.1", headerFields: nil)!
+                protocolInstance.client?.urlProtocol(protocolInstance, didReceive: response, cacheStoragePolicy: .notAllowed)
+                let fail: @Sendable () -> Void = { protocolInstance.failResponse() }
+                failResponse.withLock { $0 = fail }
+                ready.fulfill()
+            } }
+            let sending = Task { try await sender.flush(queue) }
+            await fulfillment(of: [ready], timeout: 3)
+            let fail = try XCTUnwrap(failResponse.withLock { $0 })
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { sending.cancel() }
+                group.addTask { fail() }
+            }
+            do { try await sending.value; XCTFail("Both racing outcomes are failures, even after 201") }
+            catch { XCTAssertEqual(error as? AzureBlobError, .networkFailure) }
+            XCTAssertEqual(try queue.batchesForFlush().flatMap(\.events).count, 1)
+            http.state.withLock { $0.response = { $0.sendResponseChunks(status: 201) } }
+            try await sender.flush(queue)
+            XCTAssertTrue(try queue.batchesForFlush().isEmpty, "The queue/session must remain usable after the race")
+        }
     }
 
     func testClosedLabelsAndFiniteMetricsSurviveWireAndJournalUnchanged() async throws {
@@ -699,6 +892,8 @@ private final class BlobHTTPFixture: @unchecked Sendable {
         var error: URLError?
         var redirect: URL?
         var onRequest: (@Sendable () -> Void)?
+        var response: (@Sendable (BlobURLProtocol) -> Void)?
+        var onStop: (@Sendable () -> Void)?
     }
     let state = Mutex(State())
     let container: URL
@@ -721,6 +916,7 @@ private final class BlobHTTPFixture: @unchecked Sendable {
 
 private final class BlobURLProtocol: URLProtocol, @unchecked Sendable {
     static let fixtures = Mutex<[String: BlobHTTPFixture]>([:])
+    private let stopped = Mutex(false)
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -730,9 +926,10 @@ private final class BlobURLProtocol: URLProtocol, @unchecked Sendable {
         }
         let reply = fixture.state.withLock { value in
             value.requests.append(request)
-            return (value.status, value.headers, value.error, value.onRequest, value.redirect)
+            return (value.status, value.headers, value.error, value.onRequest, value.redirect, value.response)
         }
         reply.3?()
+        if let respond = reply.5 { respond(self); return }
         if let error = reply.2 {
             client?.urlProtocol(self, didFailWithError: error)
         } else {
@@ -746,8 +943,54 @@ private final class BlobURLProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocolDidFinishLoading(self)
         }
     }
-    override func stopLoading() {}
+    override func stopLoading() {
+        stopped.withLock { $0 = true }
+        let fixture = Self.fixtures.withLock { $0[request.url?.host ?? ""] }
+        fixture?.state.withLock { $0.onStop }?()
+    }
+
+    func sendResponseChunks(status: Int, code: String? = nil, error: URLError? = nil) {
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
+            headerFields: code.map { ["x-ms-error-code": $0] })!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        // Fixed, bounded fixture; the body is deliberately irrelevant to receipts.
+        for _ in 0..<32 { client?.urlProtocol(self, didLoad: Data(repeating: 0x43, count: 8 * 1_024)) }
+        if let error { client?.urlProtocol(self, didFailWithError: error) }
+        else { client?.urlProtocolDidFinishLoading(self) }
+    }
+
+    func failResponse() {
+        client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+    }
+
+#if os(macOS)
+    func sendMeasuredChunks(remaining: Int, baseline: Int, sent: Int = 0,
+                            completion: @escaping @Sendable (Int, Int) -> Void) {
+        guard !stopped.withLock({ $0 }) else { return }
+        guard remaining > 0 else {
+            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(100)) {
+                completion(max(0, responseHeapBytes() - baseline), sent)
+            }
+            return
+        }
+        autoreleasepool {
+            let bytes = Data(repeating: UInt8(remaining % 251), count: 64 * 1_024)
+            client?.urlProtocol(self, didLoad: bytes)
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(2)) {
+            self.sendMeasuredChunks(remaining: remaining - 1, baseline: baseline, sent: sent + 64 * 1_024, completion: completion)
+        }
+    }
+#endif
 }
+
+#if os(macOS)
+private func responseHeapBytes() -> Int {
+    var statistics = malloc_statistics_t()
+    malloc_zone_statistics(nil, &statistics) // In-use allocations across all zones, not RSS/cache size.
+    return Int(statistics.size_in_use)
+}
+#endif
 
 private func requestBody(_ request: URLRequest) throws -> Data {
     if let body = request.httpBody { return body }
