@@ -65,6 +65,127 @@ The disk format remains UUID-named JSON arrays using the existing ISO-8601 dates
 
 The shipper sets a ten-second request timeout and accepts HTTP 2xx. It groups streams by event name; lines contain the name when properties are empty, otherwise sorted `key=value` text. This is not the Web/Python JSON envelope.
 
+## Unreleased internal Azure Blob transport core
+
+`AzureBlobTransport` is **internal**, not a new public `TelemetryService` or a
+released consumer entry point. Loki APIs, defaults and wire bytes are unchanged.
+Public Blob wiring remains dependent on separately reviewed privacy adoption,
+configuration and observability work. This internal core enforces its own
+default-deny policy; generic `TelemetryEvent.properties` do **not** inherit
+`LokiLogSink` filtering. No consumer rollout is established here.
+
+`AzureBlobPrivacyPolicy` is an instance-owned validator, not a global registry.
+The caller supplies reviewed, code-configured exact event names and per-event
+field constraints: `finiteNumber` accepts a complete finite JSON-number string,
+and `label` accepts only membership in the configured closed set. There is no
+arbitrary-string rule, wildcard name/key or automatic field removal. Unregistered
+names/keys, unsafe values under registered keys and non-finite numbers reject the
+whole batch with the fixed, content-free `privacyRejected` error. With no policy,
+no batch can be exported. Valid accepted values are not normalized or rewritten.
+
+The same policy explicitly lists approved app/build path labels, including any
+historical values that may be replayed. Policy names/keys/labels must never be
+derived from incoming event content. App/build and install UUID must come from
+reviewed product code/configuration and an approved non-personal install-identity
+lifecycle. Syntax, finite numbers or UUID shape cannot prove provenance: an account
+UUID, sensitive numeric measurement or user-derived label does not become safe by
+passing a parser. No general event-identifier rule or product vocabulary is added.
+
+Blob obtains a non-writing queue snapshot, validates all events in each batch
+before encoding or transport persistence, and only then attempts durable writes.
+On restart it revalidates source events and stored path against the current policy.
+It also decompresses the entire saved gzip stream and requires byte equality with
+the currently approved canonical NDJSON; source digest alone is not privacy
+approval. Extra JSON fields, optional gzip header metadata, trailing data,
+concatenated gzip members or stricter-policy
+mismatches block export without changing the journal, assigning a new upload ID,
+acknowledging delivery, deleting or migrating any records. Valid legacy compressed
+bytes are sent unchanged, not recompressed. As with other failures, a rejected
+batch stops that flush and can block later safe backlog until its policy or data
+disposition is explicitly resolved; this is not automatic recovery or disposal.
+
+This is an export/journal guard, **not** a privacy guarantee for the generic queue.
+Legacy `TelemetryQueue` and public Loki/TelemetryDeck admission/default behavior
+are unchanged: unsafe content they already accepted can remain in memory or raw
+JSON files. This core neither admits new events nor erases those files. A rejected
+dirty suffix remains in memory without a Blob-triggered rewrite; process exit can
+still lose a previously failed generic enqueue, as documented above. Public
+ingress protection, compatible adoption/migration and disposal of unsafe retained
+records remain separate work. Rolling back to an older exporter can remove this
+guard and expose old content; a readable queue format does not imply safe rollback.
+
+The core takes an explicit HTTPS container URL, create-only container service SAS
+query, app/build/install ID and the explicit privacy policy. It reads no environment,
+plist, Keychain or build secrets. Stored-policy SAS (`si`, without `sp`) is supported;
+explicit `sp`, when present, must be `c`. The caller owns the policy's actual
+permissions and consent. The transport creates its own ephemeral `URLSession` for
+each flush and invalidates it on exit, including failure and cancellation. It
+never borrows a caller's session/delegate, credential store, cookies, additional
+headers, cache or proxy configuration. Credential/cookie stores and caching are
+disabled; redirects and non-server-trust authentication challenges are refused at
+both the session (NTLM, Negotiate, client certificate) and task levels. Server trust
+uses system default TLS validation, without supplying credentials or accepting
+certificates itself. No payload, SAS URL or server error body is logged or included
+in transport errors.
+
+Response bodies are streamed to a discard-only data delegate, never aggregated,
+written to disk, logged or copied into errors/journals. Only the HTTP status and
+whether the exact overwrite code matched are retained by the receipt handler.
+Headers alone do not acknowledge delivery: successful terminal task completion is
+required, and a later network error or cancellation keeps the batch pending even
+after 201/overwrite headers. No intentional header-only cancellation, response
+size policy or queue-capacity policy is introduced. Cancellation and completion
+atomically take a single continuation; a cancelled flush releases its task/session
+and later flushes can retry normally. Existing request timeouts remain unchanged;
+this bounds application-retained response state, not total network traffic or
+every transient buffer inside Foundation.
+
+The internal `configuration` argument is only a source of `protocolClasses` for
+isolated tests; all other settings are ignored, and the protocol list is captured
+at construction. Injected protocols are trusted code capable of observing requests,
+not a sandbox for untrusted networking extensions. Callers cannot use this seam to
+replace the transport's authentication delegate. Synthetic tests verify Foundation
+challenge routing, request isolation and the default-trust disposition; they do not
+establish a real TLS handshake or live Azure acceptance.
+
+Each request is `PUT` with `x-ms-blob-type: BlockBlob`, `If-None-Match: *`,
+`Content-Type: application/x-ndjson` and `Content-Encoding: gzip`. The system zlib
+produces the gzip stream; no new package dependency is required. Each NDJSON line
+contains the existing event's `name`, `properties` and ISO8601 `timestamp`, with a
+final newline. Blob timestamps use the legacy queue's whole-second precision from
+the first send; live Loki timestamps retain their existing precision.
+
+Before the first request, the full queue batch must be durable. A checksummed
+`<queue-id>.azure-blob` sidecar freezes the exact compressed bytes, source digest,
+destination and `<app>/<build>/<yyyy-mm-dd>/<install-id>/<batch-uuid>.ndjson.gz`
+path, using UTC at preparation and a fresh upload UUID. It contains no SAS. Retries
+and restarts use those bytes, not recompression or current build/clock/install
+values. A changed container or mismatched/corrupt source record blocks that batch;
+it cannot redirect old data using new credentials. SAS rotation for the same
+container is possible without changing batch identity. One live owner per store
+directory remains required; do not share the directory with concurrent Loki/Blob
+instances, edit journals or mix copied queue files from different stores.
+
+Only HTTP201, or a validated retransmission returning HTTP403 with exactly
+`x-ms-error-code: UnauthorizedBlobOverwrite`, permits queue removal. The latter
+relies on the durable immutable request, exclusive ownership of the upload
+namespace and a previously unresolved attempt (including termination during the
+request); it is not a remote content-hash readback. A first overwrite rejection is
+not acknowledged, even on repeated definitive retries. Other 403/409 responses,
+missing/unknown error codes and network ambiguity retain pending work. A failed
+write-ahead record prevents sending; storage failures use the existing queue
+counter. This is not an exactly-once or absolute no-loss guarantee.
+
+Legacy UUID JSON event arrays stay readable without migration; older Loki code
+ignores sidecars and can still replay those arrays, with its existing duplicate
+risks. Retain unsent files when rolling back. Removal happens source-first only
+after confirmed delivery; interruption or sidecar-removal failure at that point
+can leave an inert sidecar, never deletion of unconfirmed source data. Automatic
+orphan cleanup, disk caps, oversized-event eviction, heartbeat/disabled reporting,
+public privacy filtering, release packaging and real consumer acceptance are not
+implemented by this slice. The current encoder retains data and fails preparation
+if a single NDJSON body exceeds zlib's 32-bit input range; it does not evict events.
+
 ## Console logging and remote log mirror
 
 Illustrative/source-reviewed, not executed; local logging only unless a remote sink has already been configured elsewhere in the process:
