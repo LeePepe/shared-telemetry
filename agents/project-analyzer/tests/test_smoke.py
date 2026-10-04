@@ -7,17 +7,23 @@ Runnable both via pytest and directly:
 from __future__ import annotations
 
 import json
+import os
+import socket
 import sys
 import unittest
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+
+import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from lib.analyzer import summarize_actions, summarize_performance  # noqa: E402
+from lib import dashboard_reporter  # noqa: E402
 from lib.config import load_config  # noqa: E402
 from lib.loki_client import LokiClient, LogEntry, QueryResult  # noqa: E402
 from lib.report import format_remediation_brief, format_report  # noqa: E402
@@ -27,6 +33,75 @@ from run import (  # noqa: E402
 
 
 CONFIG_PATH = ROOT / "config.example.yaml"
+REPORTER_URL = "https://dashboard.invalid/api/v1"
+
+
+@contextmanager
+def _isolated_reporter_io(root, *, unavailable=False):
+    """Guard only reporter-sensitive cases; never let swallowed I/O escapes pass."""
+    root = Path(os.path.abspath(root))
+    config = Path(os.path.abspath(CONFIG_PATH))
+    real_mkdir, real_open = Path.mkdir, Path.open
+    violations = []
+
+    def deny(kind):
+        violations.append(kind)
+        raise AssertionError(f"Reporter fixture blocked {kind}")
+
+    def guarded_mkdir(path, *args, **kwargs):
+        if not Path(os.path.abspath(path)).is_relative_to(root):
+            deny("filesystem escape")
+        return real_mkdir(path, *args, **kwargs)
+
+    def guarded_open(path, mode="r", *args, **kwargs):
+        target = Path(os.path.abspath(path))
+        if not (target.is_relative_to(root) or
+                (target == config and mode in {"r", "rt", "rb"})):
+            deny("filesystem escape")
+        return real_open(path, mode, *args, **kwargs)
+
+    def deny_network(*args, **kwargs):
+        deny("network escape")
+
+    def respond(url, **kwargs):
+        registration = url == f"{REPORTER_URL}/agents/register"
+        if not registration and url not in {
+            f"{REPORTER_URL}/agents/synthetic-agent/heartbeat",
+            f"{REPORTER_URL}/agents/synthetic-agent/tasks",
+        }:
+            deny("unexpected HTTP route")
+        fields = {"json", "timeout"} if registration else {"json", "headers", "timeout"}
+        if (set(kwargs) != fields or not isinstance(kwargs["json"], dict) or
+                kwargs["timeout"] != (10 if registration else 5)):
+            deny("unexpected HTTP arguments")
+        if unavailable:
+            raise requests.ConnectionError("synthetic unavailable reporter")
+        response = requests.Response()
+        response.status_code = 201 if registration else 204
+        response.encoding = "utf-8"
+        response._content = json.dumps({
+            "agent_id": "synthetic-agent", "api_key": "synthetic-only",
+        }).encode() if registration else b""
+        return response
+
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(Path, "mkdir", guarded_mkdir))
+        stack.enter_context(patch.object(Path, "open", guarded_open))
+        # Stop before requests can prepare auth/netrc, not merely at Session.send.
+        stack.enter_context(patch.object(requests.sessions.Session, "request", deny_network))
+        for owner, name in ((socket, "getaddrinfo"), (socket, "create_connection"),
+                            (socket.socket, "connect"), (socket.socket, "connect_ex")):
+            stack.enter_context(patch.object(owner, name, deny_network))
+        stack.enter_context(patch.object(dashboard_reporter, "STATE_DIR", root / "reporter-state"))
+        stack.enter_context(patch.dict(os.environ, {
+            "AGENT_OPS_BASE_URL": REPORTER_URL, "AGENT_OPS_NAME": "synthetic-daily",
+        }))
+        post = stack.enter_context(patch.object(dashboard_reporter.requests, "post", side_effect=respond))
+        try:
+            yield post
+        finally:
+            if violations:
+                raise AssertionError(f"Reporter fixture recorded blocked I/O: {violations}")
 
 
 def _fake_loki_payload(lines):
@@ -252,7 +327,7 @@ class DailyJsonSchemaTests(unittest.TestCase):
     def test_daily_dry_run(self):
         """--daily --dry-run should succeed (exit 0)."""
         import tempfile
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, _isolated_reporter_io(tmp) as post:
             from run import run as run_main
             rc = run_main([
                 "--config", str(CONFIG_PATH), "--daily", "--dry-run", "--output-dir", tmp,
@@ -265,6 +340,35 @@ class DailyJsonSchemaTests(unittest.TestCase):
             content = json.loads(json_files[0].read_text())
             for key in ("project", "date", "storage", "usage", "performance"):
                 self.assertIn(key, content)
+            state_file = Path(tmp) / "reporter-state" / "synthetic-daily.json"
+            self.assertEqual(json.loads(state_file.read_text()), {
+                "agent_id": "synthetic-agent", "api_key": "synthetic-only",
+            })
+            calls = post.call_args_list
+            self.assertEqual(len(calls), 5)
+            self.assertEqual(calls[0].args, (f"{REPORTER_URL}/agents/register",))
+            self.assertEqual(calls[0].kwargs, {
+                "json": {"name": "synthetic-daily", "kind": "telemetry_analyzer",
+                         "description": "LokiKit daily project telemetry analyzer"},
+                "timeout": 10,
+            })
+            reports = {path.parent.name: path for path in json_files}
+            self.assertEqual(set(reports), {"example-web", "example-ios"})
+            headers = {"Content-Type": "application/json", "Authorization": "Bearer synthetic-only"}
+            for index, project in enumerate(("example-web", "example-ios")):
+                heartbeat, task = calls[1 + index * 2:3 + index * 2]
+                date = json.loads(reports[project].read_text())["date"]
+                self.assertEqual(heartbeat.args, (f"{REPORTER_URL}/agents/synthetic-agent/heartbeat",))
+                self.assertEqual(heartbeat.kwargs, {
+                    "json": {"status": "running", "meta": {"project": project, "mode": "daily"}},
+                    "headers": headers, "timeout": 5,
+                })
+                self.assertEqual(task.args, (f"{REPORTER_URL}/agents/synthetic-agent/tasks",))
+                self.assertEqual(task.kwargs, {
+                    "json": {"kind": "daily_summary", "ref": f"{project}/{date}", "count": 1,
+                             "payload": {"project": project, "date": date, "json_path": str(reports[project])}},
+                    "headers": headers, "timeout": 5,
+                })
 
 
 class DashboardReporterNoOpTests(unittest.TestCase):
@@ -272,22 +376,32 @@ class DashboardReporterNoOpTests(unittest.TestCase):
 
     def test_reporter_noop_when_unreachable(self):
         from lib.dashboard_reporter import DashboardReporter
-        reporter = DashboardReporter(
-            name="test-agent", kind="test", description="unit test"
-        )
-        # Setup against a non-existent URL — should not raise
-        reporter.setup("http://127.0.0.1:1")
-        self.assertFalse(reporter.enabled)
-        # These should all be silent no-ops
-        reporter.heartbeat(status="running")
-        reporter.record_task(kind="test", ref="ref/1")
+        with TemporaryDirectory() as tmp, _isolated_reporter_io(tmp, unavailable=True) as post:
+            reporter = DashboardReporter(
+                name="test-agent", kind="test", description="unit test"
+            )
+            # A controlled connection failure, never a probe of an unowned port.
+            reporter.setup(REPORTER_URL)
+            self.assertFalse(reporter.enabled)
+            # These should all be silent no-ops
+            reporter.heartbeat(status="running")
+            reporter.record_task(kind="test", ref="ref/1")
+            post.assert_called_once_with(
+                f"{REPORTER_URL}/agents/register",
+                json={"name": "test-agent", "kind": "test", "description": "unit test"},
+                timeout=10,
+            )
+            self.assertFalse((Path(tmp) / "reporter-state" / "test-agent.json").exists())
 
     def test_reporter_heartbeat_noop_without_setup(self):
         from lib.dashboard_reporter import DashboardReporter
-        reporter = DashboardReporter(name="x", kind="x")
-        # No setup called — should not raise
-        reporter.heartbeat()
-        reporter.record_task(kind="test")
+        with TemporaryDirectory() as tmp, _isolated_reporter_io(tmp) as post:
+            reporter = DashboardReporter(name="x", kind="x")
+            # No setup called — should not raise
+            reporter.heartbeat()
+            reporter.record_task(kind="test")
+            post.assert_not_called()
+            self.assertFalse((Path(tmp) / "reporter-state").exists())
 
 
 if __name__ == "__main__":
