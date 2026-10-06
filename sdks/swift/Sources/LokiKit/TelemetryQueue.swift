@@ -265,12 +265,20 @@ final class TelemetryQueue: Sendable {
         try loadInventory(state: &value)
         try finishEvictions(state: &value)
         let previous = sidecar ? (value.inventory?[id]?.sidecar ?? 0) : (value.inventory?[id]?.source ?? 0)
-        while diskBytes(value) - previous > maxDiskBytes - bytes {
-            if value.flushing && value.snapshotTaken {
+        let ownFootprint = (value.inventory?[id]?.source ?? 0) + (sidecar ? bytes : 0)
+        if value.flushing && value.snapshotTaken {
+            let needsEviction = diskBytes(value) - previous > maxDiskBytes - bytes
+            if needsEviction || ownFootprint > maxDiskBytes {
                 value.capacityDeferred = true
                 if sidecar { value.deferredSidecar = (id, bytes) }
                 throw CapacityError.flushInProgress
             }
+        }
+        if ownFootprint > maxDiskBytes {
+            try evict(id, state: &value)
+            throw CapacityError.evicted
+        }
+        while diskBytes(value) - previous > maxDiskBytes - bytes {
             guard let oldest = evictionOrder(value).first else {
                 throw CocoaError(.fileWriteOutOfSpace)
             }
