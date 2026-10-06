@@ -5,6 +5,17 @@ Initial path: local `LokiKit` checkout → the same public module from a fixed
 does not. This provider slice makes no runtime, platform or API change and
 does not modify any product's dependency.
 
+The later **unreleased queue-capacity change** adds a default 50 MiB disk-data
+cap with a positive `maxDiskBytes` constructor override and `droppedEventCount`.
+It preserves event JSON and Blob wire formats, but can discard oldest batches.
+The loss ledger and all retained files form one single-owner store. Before
+rolling back to a reader without this policy, resolve any pending eviction
+cleanup using the capacity-aware SDK after storage becomes writable; otherwise
+the older reader can replay logically dropped files. Do not discard the ledger
+or mix old/new writers. Already evicted events cannot be recovered by rollback.
+See the [queue contract](../sdks/swift/README.md#loki-event-telemetry) for accounting,
+in-flight deferral and failed-persistence limits.
+
 1. Record the old source SHA/resolution, consumer adapter, enabled/consent
    semantics, labels and persistence locations without copying private content.
 2. Replace only the dependency source with the reviewed immutable candidate;

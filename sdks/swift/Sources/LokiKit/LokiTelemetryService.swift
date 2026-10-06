@@ -17,6 +17,11 @@ public final class LokiTelemetryService: TelemetryService, @unchecked Sendable {
     /// 本实例累计失败的持久化操作次数（非丢失事件数）；读取不执行 I/O。
     public var persistenceFailureCount: Int { queue.persistenceFailureCount }
 
+    /// 容量策略累计丢弃的事件数（非批次数），随队列持久化并跨实例恢复。
+    /// 计数写入失败会保留在内存中重试；该情况下退出进程仍可能丢失计数。
+    /// 计数在 Int.max 饱和；读取不执行 I/O。
+    public var droppedEventCount: Int { queue.droppedEventCount }
+
     // MARK: - Private
 
     private let queue: TelemetryQueue
@@ -31,15 +36,18 @@ public final class LokiTelemetryService: TelemetryService, @unchecked Sendable {
     ///   - isEnabled: 是否启用，默认 true
     ///   - authToken: Bearer token（Grafana Cloud 使用 `<user>:<apikey>` base64 编码）
     ///   - storeDirectory: 离线队列目录，nil 使用默认路径（Application Support/telemetry/pending）
+    ///   - maxDiskBytes: 队列源文件与 Blob sidecar 的总字节上限，默认 50 MiB，必须为正。
+    ///     超限按旧批次优先淘汰；单条事件的 JSON 数组本身超限则直接丢弃。
     public init(
         endpoint: URL,
         appLabels: [String: String] = [:],
         isEnabled: Bool = true,
         authToken: String? = nil,
-        storeDirectory: URL? = nil
+        storeDirectory: URL? = nil,
+        maxDiskBytes: Int = 50 * 1024 * 1024
     ) {
         self.isEnabled = isEnabled
-        self.queue = TelemetryQueue(storeDirectory: storeDirectory)
+        self.queue = TelemetryQueue(storeDirectory: storeDirectory, maxDiskBytes: maxDiskBytes)
 
         var headers: [String: String] = [:]
         if let token = authToken {
