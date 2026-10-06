@@ -33,7 +33,7 @@ struct AzureBlobTransport: Sendable {
         self.privacy = privacy
     }
 
-    func flush(_ queue: TelemetryQueue) async throws {
+    func flush(_ queue: TelemetryQueue, responseBytesObserved: (@Sendable (Int) -> Void)? = nil) async throws {
         guard queue.beginFlush() else { return }
         defer { queue.endFlush() }
         let configuration = URLSessionConfiguration.ephemeral
@@ -45,7 +45,7 @@ struct AzureBlobTransport: Sendable {
         configuration.httpAdditionalHeaders = nil
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        let responseDelegate = BlobRequestDelegate()
+        let responseDelegate = BlobRequestDelegate(responseBytesObserved: responseBytesObserved)
         let session = URLSession(configuration: configuration, delegate: responseDelegate, delegateQueue: nil)
         // Reuse connections only within this flush; release session/delegate resources
         // on success, storage/network failure and cancellation, with no caller lifecycle.
@@ -278,6 +278,12 @@ final class BlobRequestDelegate: NSObject, URLSessionDataDelegate, Sendable {
     // flush sends sequentially. Retain one task/continuation and fixed-size receipt
     // metadata, never a response body, untrusted error string, or response history.
     private let pending = Mutex<Pending?>(nil)
+    private let responseBytesObserved: (@Sendable (Int) -> Void)?
+
+    init(responseBytesObserved: (@Sendable (Int) -> Void)? = nil) {
+        self.responseBytesObserved = responseBytesObserved
+        super.init()
+    }
 
     func response(for request: URLRequest, using session: URLSession) async throws -> Response {
         let task = session.dataTask(with: request) // No completion-handler aggregation.
@@ -340,6 +346,9 @@ final class BlobRequestDelegate: NSObject, URLSessionDataDelegate, Sendable {
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         // Streaming discard: no buffering, file output, logging or intentional cancellation.
+        // Internal, session-owned observation only; never participates in receipts.
+        // Invoke outside locks and expose only the count, not response content.
+        responseBytesObserved?(data.count)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {

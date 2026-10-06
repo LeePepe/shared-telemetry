@@ -88,34 +88,78 @@ final class AzureBlobTransportTests: XCTestCase {
         let queue = TelemetryQueue(storeDirectory: directory)
         queue.enqueue(TelemetryEvent(name: "synthetic.first", properties: ["count": "1"]))
         let entered = expectation(description: "bounded synthetic response delivered")
-        let sampled = Mutex<(growth: Int, sent: Int)?>(nil)
+        let sampled = Mutex<MeasuredBlobResponse.Sample?>(nil)
+        let response = MeasuredBlobResponse { measurement in
+            sampled.withLock { $0 = measurement }
+            entered.fulfill()
+        }
         http.state.withLock { state in
-            state.response = { protocolInstance in
-                let response = HTTPURLResponse(url: protocolInstance.request.url!, statusCode: 201,
-                    httpVersion: "HTTP/1.1", headerFields: nil)!
-                protocolInstance.client?.urlProtocol(protocolInstance, didReceive: response, cacheStoragePolicy: .notAllowed)
-                let baseline = responseHeapBytes()
-                // Fixed 32 MiB total, one 64 KiB fixture chunk at a time. No real
-                // endpoint, unlimited allocation or memory-limit policy is involved.
-                protocolInstance.sendMeasuredChunks(remaining: 512, baseline: baseline) { growth, sent in
-                    sampled.withLock { $0 = (growth, sent) }
-                    entered.fulfill()
-                    protocolInstance.client?.urlProtocol(protocolInstance, didFailWithError: URLError(.networkConnectionLost))
-                }
-            }
+            state.response = { response.start($0) }
+            state.onStop = { response.stop() }
         }
         let sender = try transport()
-        let sending = Task { try await sender.flush(queue) }
-        defer { sending.cancel() }
+        let sending = Task { try await sender.flush(queue, responseBytesObserved: { response.observe($0) }) }
+        defer { response.stop(); sending.cancel() }
         await fulfillment(of: [entered], timeout: 8)
+        if sampled.withLock({ $0 == nil }) {
+            response.stop()
+            sending.cancel() // A failed watchdog must not leave the real flush suspended.
+        }
         do { try await sending.value; XCTFail("201 headers cannot hide a terminal network error") }
         catch { XCTAssertEqual(error as? AzureBlobError, .networkFailure) }
         let measurement = try XCTUnwrap(sampled.withLock { $0 })
         XCTAssertEqual(measurement.sent, 32 * 1_024 * 1_024)
-        print("RESPONSE_BODY_HEAP growth=\(measurement.growth) sent=\(measurement.sent)")
+        XCTAssertEqual(measurement.observed, 32 * 1_024 * 1_024)
+        XCTAssertLessThanOrEqual(measurement.maxOutstanding, 64 * 1_024)
+        print("RESPONSE_BODY_HEAP growth=\(measurement.growth) sent=\(measurement.sent) observed=\(measurement.observed) maxOutstanding=\(measurement.maxOutstanding)")
         XCTAssertLessThan(measurement.growth, measurement.sent / 2,
                           "Response bytes must not be retained as an aggregate while awaiting completion")
         XCTAssertEqual(try queue.batchesForFlush().flatMap(\.events).count, 1)
+        let finished = await response.resumeAfterPause()
+        XCTAssertEqual(finished.sent, measurement.sent)
+        XCTAssertEqual(finished.samples, 1)
+        XCTAssertFalse(finished.holdsResponse)
+    }
+
+    func testResponseConsumptionCancellationFencesNextChunkAndFinalSample() async throws {
+        for pauseAt in [64 * 1_024, 32 * 1_024 * 1_024] {
+            let folder = directory.appendingPathComponent("cancel-\(pauseAt)")
+            let queue = TelemetryQueue(storeDirectory: folder)
+            queue.enqueue(TelemetryEvent(name: "synthetic.first", properties: ["count": "1"]))
+            let id = try XCTUnwrap(queue.batchesForFlush().first?.id)
+            let source = folder.appendingPathComponent("\(id).json")
+            let journal = folder.appendingPathComponent("\(id).azure-blob")
+            let paused = expectation(description: "real delegate consumed \(pauseAt) bytes")
+            let stopped = expectation(description: "real cancelled protocol stopped")
+            let response = MeasuredBlobResponse(pauseAfterObservedBytes: pauseAt, onPause: { paused.fulfill() }) { _ in
+                XCTFail("Cancelled response must not sample or submit a terminal fixture error")
+            }
+            http.state.withLock {
+                $0.response = { response.start($0) }
+                $0.onStop = { response.stop(); stopped.fulfill() }
+            }
+            let sender = try transport()
+            let sending = Task { try await sender.flush(queue, responseBytesObserved: { response.observe($0) }) }
+            defer { response.stop(); sending.cancel() }
+            await fulfillment(of: [paused], timeout: 8)
+            let frozenSource = try Data(contentsOf: source)
+            let frozenJournal = try Data(contentsOf: journal)
+            sending.cancel()
+            do { try await sending.value; XCTFail("Cancellation cannot acknowledge a response") }
+            catch { XCTAssertEqual(error as? AzureBlobError, .networkFailure) }
+            await fulfillment(of: [stopped], timeout: 3)
+            let cancelled = await response.resumeAfterPause()
+            XCTAssertEqual(cancelled.sent, pauseAt, "Stopped fixture cannot release the next queued chunk")
+            XCTAssertEqual(cancelled.observed, pauseAt)
+            XCTAssertEqual(cancelled.samples, 0, "Stopped fixture cannot run a queued heap sample")
+            XCTAssertFalse(cancelled.holdsResponse, "Stop releases protocol and completion references")
+            XCTAssertEqual(try Data(contentsOf: source), frozenSource)
+            XCTAssertEqual(try Data(contentsOf: journal), frozenJournal)
+            XCTAssertEqual(try queue.batchesForFlush().flatMap(\.events).count, 1)
+            http.state.withLock { $0.onStop = nil; $0.response = { $0.sendResponseChunks(status: 201) } }
+            try await sender.flush(queue) // Default-nil observer, new owned session; retry remains usable.
+            XCTAssertTrue(try queue.batchesForFlush().isEmpty)
+        }
     }
 #endif
 
@@ -916,7 +960,6 @@ private final class BlobHTTPFixture: @unchecked Sendable {
 
 private final class BlobURLProtocol: URLProtocol, @unchecked Sendable {
     static let fixtures = Mutex<[String: BlobHTTPFixture]>([:])
-    private let stopped = Mutex(false)
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -944,7 +987,6 @@ private final class BlobURLProtocol: URLProtocol, @unchecked Sendable {
         }
     }
     override func stopLoading() {
-        stopped.withLock { $0 = true }
         let fixture = Self.fixtures.withLock { $0[request.url?.host ?? ""] }
         fixture?.state.withLock { $0.onStop }?()
     }
@@ -963,28 +1005,128 @@ private final class BlobURLProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
     }
 
-#if os(macOS)
-    func sendMeasuredChunks(remaining: Int, baseline: Int, sent: Int = 0,
-                            completion: @escaping @Sendable (Int, Int) -> Void) {
-        guard !stopped.withLock({ $0 }) else { return }
-        guard remaining > 0 else {
-            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(100)) {
-                completion(max(0, responseHeapBytes() - baseline), sent)
-            }
-            return
-        }
-        autoreleasepool {
-            let bytes = Data(repeating: UInt8(remaining % 251), count: 64 * 1_024)
-            client?.urlProtocol(self, didLoad: bytes)
-        }
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(2)) {
-            self.sendMeasuredChunks(remaining: remaining - 1, baseline: baseline, sent: sent + 64 * 1_024, completion: completion)
-        }
-    }
-#endif
 }
 
 #if os(macOS)
+// The real data delegate acknowledges byte counts, not URLProtocol submissions.
+// One unacknowledged chunk, with at most a preceding callback still returning.
+private final class MeasuredBlobResponse: @unchecked Sendable {
+    struct Sample: Sendable {
+        let growth: Int
+        let sent: Int
+        let observed: Int
+        let maxOutstanding: Int
+    }
+    struct Progress: Sendable {
+        let sent: Int
+        let observed: Int
+        let samples: Int
+        let holdsResponse: Bool
+    }
+
+    private let coordination = DispatchQueue(label: "BlobTests.response-consumption")
+    private let stopped = Mutex(false)
+    // Everything below is owned by coordination; no external callback runs in a lock.
+    private var protocolInstance: BlobURLProtocol?
+    private var completion: (@Sendable (Sample) -> Void)?
+    private var onPause: (@Sendable () -> Void)?
+    private let pauseAfterObservedBytes: Int?
+    private var paused = false
+    private var samples = 0
+    private var baseline = 0
+    private var submitted = 0
+    private var observed = 0
+    private var maxOutstanding = 0
+    private let total = 512 * 64 * 1_024
+
+    init(pauseAfterObservedBytes: Int? = nil, onPause: (@Sendable () -> Void)? = nil,
+         completion: @escaping @Sendable (Sample) -> Void) {
+        self.pauseAfterObservedBytes = pauseAfterObservedBytes
+        self.onPause = onPause
+        self.completion = completion
+    }
+
+    func start(_ instance: BlobURLProtocol) {
+        coordination.async {
+            guard !self.stopped.withLock({ $0 }) else { return }
+            self.protocolInstance = instance
+            let response = HTTPURLResponse(url: instance.request.url!, statusCode: 201,
+                httpVersion: "HTTP/1.1", headerFields: nil)!
+            instance.client?.urlProtocol(instance, didReceive: response, cacheStoragePolicy: .notAllowed)
+            self.baseline = responseHeapBytes()
+            self.coordination.async { self.pump() }
+        }
+    }
+
+    func observe(_ count: Int) {
+        guard count > 0 else { return }
+        coordination.async {
+            guard !self.stopped.withLock({ $0 }) else { return }
+            self.observed += count
+            XCTAssertLessThanOrEqual(self.observed, self.submitted)
+            if self.observed == self.submitted {
+                self.coordination.async { self.pump() }
+            }
+        }
+    }
+
+    func stop() {
+        stopped.withLock { $0 = true }
+        coordination.async {
+            self.protocolInstance = nil
+            self.completion = nil
+            self.onPause = nil
+        }
+    }
+
+    // A nonblocking fixture pause lets real cancellation win before an already
+    // planned next emission/sample. Releasing it still traverses the real fence.
+    func resumeAfterPause() async -> Progress {
+        await withCheckedContinuation { continuation in
+            coordination.async {
+                self.paused = false
+                self.pump()
+                continuation.resume(returning: Progress(sent: self.submitted, observed: self.observed,
+                    samples: self.samples, holdsResponse: self.protocolInstance != nil || self.completion != nil || self.onPause != nil))
+            }
+        }
+    }
+
+    private func pump() {
+        guard !stopped.withLock({ $0 }), let instance = protocolInstance,
+              observed == submitted else { return }
+        if observed == pauseAfterObservedBytes, let notify = onPause {
+            onPause = nil
+            paused = true
+            notify()
+        }
+        guard !paused else { return }
+        guard submitted < total else {
+            let maySample = stopped.withLock { value in
+                guard !value else { return false }
+                value = true
+                return true
+            }
+            guard maySample else { return }
+            let complete = completion
+            completion = nil
+            protocolInstance = nil
+            samples += 1
+            let sample = Sample(growth: max(0, responseHeapBytes() - baseline), sent: submitted,
+                                observed: observed, maxOutstanding: maxOutstanding)
+            complete?(sample)
+            instance.failResponse() // Sample before the deliberate real terminal error.
+            return
+        }
+        submitted += 64 * 1_024
+        maxOutstanding = max(maxOutstanding, submitted - observed)
+        autoreleasepool {
+            let bytes = Data(repeating: UInt8((submitted / (64 * 1_024)) % 251), count: 64 * 1_024)
+            instance.client?.urlProtocol(instance, didLoad: bytes)
+        }
+    }
+}
+
 private func responseHeapBytes() -> Int {
     var statistics = malloc_statistics_t()
     malloc_zone_statistics(nil, &statistics) // In-use allocations across all zones, not RSS/cache size.
