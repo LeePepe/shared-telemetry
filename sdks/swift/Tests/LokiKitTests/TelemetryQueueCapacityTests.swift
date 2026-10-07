@@ -50,6 +50,37 @@ final class TelemetryQueueCapacityTests: XCTestCase {
         XCTAssertEqual(queue.persistenceFailureCount, 0)
     }
 
+    func testEvictingEarlierBatchKeepsCurrentBatchAppendableAcrossRestart() throws {
+        let queue = TelemetryQueue(storeDirectory: directory, maxDiskBytes: eventBytes * 3)
+        queue.enqueue(event("a"))
+        queue.enqueue(event("b"))
+        let oldestID = try XCTUnwrap(queue.batchesForFlush().first?.id)
+        queue.enqueue(event("c"))
+        let currentID = try XCTUnwrap(queue.loadPersistedBatches().first { $0.id != oldestID }?.id)
+        XCTAssertEqual(queue.droppedEventCount, 0)
+
+        // Growing the current batch evicts the earlier two-event batch. Do not
+        // take a flush snapshot here: it would seal the batch before the append.
+        queue.enqueue(event("d"))
+        let afterEviction = try queue.loadPersistedBatches()
+        XCTAssertEqual(afterEviction.map(\.id), [currentID])
+        XCTAssertEqual(afterEviction.flatMap(\.events).map(\.name), ["c", "d"])
+        XCTAssertEqual(queue.droppedEventCount, 2)
+
+        queue.enqueue(event("e"))
+        let afterAppend = try queue.batchesForFlush()
+        XCTAssertEqual(afterAppend.map(\.id), [currentID], "Append to the surviving batch, not a replacement")
+        XCTAssertEqual(afterAppend.flatMap(\.events).map(\.name), ["c", "d", "e"])
+        XCTAssertEqual(queue.droppedEventCount, 2)
+        XCTAssertEqual(queue.persistenceFailureCount, 0)
+        let restarted = TelemetryQueue(storeDirectory: directory, maxDiskBytes: eventBytes * 3)
+        let recovered = try restarted.loadPersistedBatches()
+        XCTAssertEqual(recovered.map(\.id), [currentID])
+        XCTAssertEqual(recovered.flatMap(\.events).map(\.name), ["c", "d", "e"])
+        XCTAssertEqual(restarted.droppedEventCount, 2)
+        XCTAssertEqual(restarted.persistenceFailureCount, 0)
+    }
+
     func testOverflowDuringFlushKeepsCapturedBatchUntilFlushEnds() throws {
         let queue = TelemetryQueue(storeDirectory: directory, maxDiskBytes: eventBytes)
         queue.enqueue(event("a"))
