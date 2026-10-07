@@ -30,6 +30,7 @@ final class TelemetryQueue: Sendable {
         var inventory: [UUID: Footprint]?
         var flushing = false
         var snapshotTaken = false
+        var retryWritesAfterFlush = true
         var capacityDeferred = false
         var deferredSidecar: (id: UUID, bytes: Int)?
     }
@@ -102,6 +103,7 @@ final class TelemetryQueue: Sendable {
             guard !value.flushing else { return false }
             value.flushing = true
             value.snapshotTaken = false
+            value.retryWritesAfterFlush = true
             return true
         }
     }
@@ -122,6 +124,10 @@ final class TelemetryQueue: Sendable {
                     // The oldest batch (possibly this reservation) was evicted.
                 } catch { value.persistenceFailures += 1 }
             }
+            // A Blob flush may stop before validating later dirty batches. Keep
+            // its no-rewrite snapshot policy through cleanup, including enqueues
+            // after the snapshot; eviction itself does not persist payloads.
+            guard value.retryWritesAfterFlush else { return }
             for batch in value.pending where value.dirty.contains(batch.id) {
                 do {
                     try writeBatch(id: batch.id, events: batch.events, state: &value)
@@ -137,6 +143,7 @@ final class TelemetryQueue: Sendable {
     func batchesForFlush(retryingWrites: Bool = true) throws -> [Batch] {
         state.withLock { value in
             defer { if value.flushing { value.snapshotTaken = true } }
+            if value.flushing && !retryingWrites { value.retryWritesAfterFlush = false }
             // Freeze file contents before transport; concurrent tracks start a new batch.
             value.activeID = nil
             // Blob disables payload rewrites until privacy validation. The explicit
