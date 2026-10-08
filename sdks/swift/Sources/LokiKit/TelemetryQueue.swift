@@ -33,6 +33,7 @@ final class TelemetryQueue: Sendable {
         var retryWritesAfterFlush = true
         var capacityDeferred = false
         var deferredSidecar: (id: UUID, bytes: Int)?
+        var deferredSources: [UUID: Int] = [:]
     }
 
     private let state = Mutex(State())
@@ -122,6 +123,19 @@ final class TelemetryQueue: Sendable {
                     }
                 } catch is CapacityError {
                     // The oldest batch (possibly this reservation) was evicted.
+                } catch { value.persistenceFailures += 1 }
+            }
+            // Reconcile source growth too, without writing any payload. Keep only
+            // byte requests, coalesced per batch; concurrent enqueues cannot erase
+            // the request that stopped the transport's validated source retry.
+            let sources = value.deferredSources
+            value.deferredSources.removeAll()
+            for id in evictionOrder(value) {
+                guard let bytes = sources[id],
+                      (value.inventory?[id]?.source ?? 0) > 0 || value.pending.contains(where: { $0.id == id }) else { continue }
+                do { try makeRoom(id: id, bytes: bytes, sidecar: false, state: &value) }
+                catch is CapacityError {
+                    // Loss was recorded before deletion, including any memory suffix.
                 } catch { value.persistenceFailures += 1 }
             }
             // A Blob flush may stop before validating later dirty batches. Keep
@@ -278,6 +292,7 @@ final class TelemetryQueue: Sendable {
             if needsEviction || ownFootprint > maxDiskBytes {
                 value.capacityDeferred = true
                 if sidecar { value.deferredSidecar = (id, bytes) }
+                else { value.deferredSources[id] = bytes }
                 throw CapacityError.flushInProgress
             }
         }
