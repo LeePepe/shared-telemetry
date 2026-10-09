@@ -1,7 +1,7 @@
 {
   "$schema": "registry.schema.json", "schemaVersion": 1,
   "library": "shared-telemetry", "releaseUnit": "LokiKit-swift",
-  "product": "LokiKit", "module": "LokiKit", "version": "0.1.0", "releaseStatus": "released",
+  "product": "LokiKit", "module": "LokiKit", "version": "0.1.0", "releaseStatus": "unreleased",
   "wireSchema": "loki-push-v1; inner line not versioned",
   "documents": {"entry": "README.md", "usage": "USAGE.md", "integration": "INTEGRATION.md", "examples": "EXAMPLES.md", "compatibility": "COMPATIBILITY.md", "migration": "MIGRATION.md", "changelog": "CHANGELOG.md"},
   "capabilities": [
@@ -14,7 +14,12 @@
     {"symbol": "LokiTelemetryService", "source": "../sdks/swift/Sources/LokiKit/LokiTelemetryService.swift"},
     {"symbol": "LokiLogSink", "source": "../sdks/swift/Sources/LokiKit/LokiLogSink.swift"},
     {"symbol": "TelemetryDeckService", "source": "../sdks/swift/Sources/LokiKit/TelemetryDeckService.swift"},
-    {"symbol": "TelemetryEventName", "source": "../sdks/swift/Sources/LokiKit/VoxPocketTelemetryEventNames.swift"}
+    {"symbol": "TelemetryEventName", "source": "../sdks/swift/Sources/LokiKit/VoxPocketTelemetryEventNames.swift"},
+    {"symbol": "AzureBlobTelemetryService", "source": "../sdks/swift/Sources/LokiKit/AzureBlobTelemetryService.swift"},
+    {"symbol": "AzureBlobTelemetryDiagnostics", "source": "../sdks/swift/Sources/LokiKit/AzureBlobTelemetryService.swift"},
+    {"symbol": "AzureBlobTelemetryError", "source": "../sdks/swift/Sources/LokiKit/AzureBlobTelemetryService.swift"},
+    {"symbol": "AzureBlobPrivacyPolicy", "source": "../sdks/swift/Sources/LokiKit/AzureBlobPrivacyPolicy.swift"},
+    {"symbol": "ValueRule", "source": "../sdks/swift/Sources/LokiKit/AzureBlobPrivacyPolicy.swift"}
   ],
   "example": "examples/swift/Tests/ConsumerTests/ConsumerTests.swift"
 }

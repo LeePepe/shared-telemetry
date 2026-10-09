@@ -19,6 +19,7 @@ These are manifest requirements, not tested combinations or an assertion of rele
 | [LokiTelemetryService](Sources/LokiKit/LokiTelemetryService.swift) | Loki event transport, synchronous enqueue persistence, configurable `maxDiskBytes`, read-only `persistenceFailureCount` and `droppedEventCount`; `resetIdentifier()` is a no-op |
 | [LokiLogSink](Sources/LokiKit/LokiLogSink.swift) | Separate, bounded, filtered log mirror; `record`, `start(flushInterval:)`, `flush() async` |
 | [TelemetryDeckService](Sources/LokiKit/TelemetryDeckService.swift) | Adapter to TelemetryDeck, not Loki |
+| [AzureBlobTelemetryService](Sources/LokiKit/AzureBlobTelemetryService.swift) | Candidate Blob admission/identity/lifecycle, allowlist, heartbeat and host-bundle configuration |
 | [TelemetryService performance extensions](Sources/LokiKit/TelemetryService+Performance.swift) | Sync/async `measure`, `measureStart`, `measureEnd`; record `duration_ms` timing and append `.failed` to failure event names, without automatically extracting error descriptions |
 | [TelemetryEventName](Sources/LokiKit/VoxPocketTelemetryEventNames.swift) | Existing product-specific enum; its presence is an exception to the product-local semantics target, not a relocation already completed |
 
@@ -73,12 +74,125 @@ The event disk format remains UUID-named JSON arrays using the existing ISO-8601
 
 The shipper sets a ten-second request timeout and accepts HTTP 2xx. It groups streams by event name; lines contain the name when properties are empty, otherwise sorted `key=value` text. This is not the Web/Python JSON envelope.
 
-## Unreleased internal Azure Blob transport core
+## Unreleased public Azure Blob Adapter
 
-`AzureBlobTransport` is **internal**, not a new public `TelemetryService` or a
-released consumer entry point. Loki APIs, defaults and wire bytes are unchanged.
-Public Blob wiring remains dependent on separately reviewed privacy adoption,
-configuration and observability work. This internal core enforces its own
+`AzureBlobTelemetryService` conforms to the existing `TelemetryService`. These
+additions are candidate source, **not included in released tag 0.1.0**; select a
+reviewed immutable revision and its matching documentation. Existing Loki and
+TelemetryDeck defaults, public methods and stores are unchanged. No product
+activation, real Azure/TLS acceptance or release is established by these examples.
+
+Construction requires an HTTPS container URL, create-only SAS query, app/build,
+`AzureBlobPrivacyPolicy`, a caller-owned **new Blob-only local directory**, explicit
+`isEnabled` consent and a `@Sendable () throws -> UUID` identity provider. Only
+trusted `protocolClasses` are captured from optional `configuration`; no caller
+delegate, credentials/cookies/headers/cache/proxy settings are inherited. No
+environment/Keychain lookup, implicit enabled default, default store, constructor
+upload or fallback Noop exists. The direct initializer is timer-free unless
+`heartbeatVersion` is supplied. Invalid direct configuration throws a fixed
+`AzureBlobTelemetryError` before identity provisioning/storage initialization.
+
+For standard host integration use the additive `bundle:app:build:version:…`
+initializer: it reads expanded `LokiKitBlobEndpoint`/`LokiKitBlobSAS` Info.plist
+strings and enables startup/daily `telemetry.heartbeat`. Missing configuration
+logs one fixed local warning per instance, exposes a disabled heartbeat, and
+does not provision identity/storage or send. See [build-setting wiring](../../ai/INTEGRATION.md#infoplist-and-build-settings).
+App/build/version must be trusted allowlisted constants. No runtime environment
+fallback or access to private configuration is implied.
+
+Illustrative explicit policy (not a live configuration or product vocabulary):
+
+```swift
+let policy = AzureBlobPrivacyPolicy(
+    events: ["sample.completed": ["duration_ms": .finiteNumber, "phase": .label(["done", "retry"])]],
+    apps: ["sample"], builds: ["candidate"]
+)
+```
+
+Register exact event names and present field keys with finite JSON-number strings
+or closed label values. Missing optional fields/name-only registered events are
+allowed. Unknown names/keys, free text under permitted keys, nonfinite numeric
+values/timestamps reject the **entire event before accepted memory or files**.
+No safe subset is silently retained. Product code owns these definitions, consent,
+field meaning and non-personal identity provenance; syntax is not universal PII
+detection. Old generic event paths do not acquire this filtering automatically.
+
+Enabled accepted `track` synchronously attempts JSON persistence and can block on
+file I/O. A failed write retains the complete memory original, but `track` returning
+and `acceptedEventCount` are not durable receipts. Flush retries the full source
+after validation before journaling/sending; it never sends only a durable prefix.
+Successful writes target process-kill/restart durability, not fsync/power loss.
+
+One checksummed `catalog.json` binds the destination/app and ordered identity/build
+epochs before events are admitted. `.owner-lock` holds a nonblocking OS lease for
+the instance and its active work; a second cooperating owner fails `storeInUse`.
+Epochs contain the existing UUID JSON batches and immutable Blob sidecars. A valid
+catalog-only epoch can have no directory yet. New builds create an epoch with the
+same install identity. Reset appends a new identity epoch before future admission;
+old memory, unjournaled files and immutable journal paths keep their prior identity
+and build. The provider runs outside state locks on a new store/reset, **not** when
+restoring a valid existing catalog. It must not return an identity previously used
+in that store. No identity is inferred from accounts or host settings.
+
+Supplier/duplicate reset failure pauses admission for that **live instance**;
+disable/re-enable does not clear it. Old sound backlog can still flush. Successful
+reset restores readiness. After the prior instance/tasks release the lease, a new
+constructor with explicit consent restores only a valid last committed catalog
+and fresh diagnostics/readiness; there is no persisted failed-reset flag. Failed
+catalog replacement is reconciled only to exact prior/proposed bytes; an unprovable
+state blocks admission and flush without repair or deletion. Provider errors are
+never formatted or retained. Concurrent/reentrant reset reports `resetInProgress`.
+
+Setting `isEnabled=false` stops new admission/upload starts and cancels the owned
+flush generation. Unconfirmed work stays pending, byte/path stable. Enabling does
+not revive that generation or automatically flush. Overlapping flush calls do not
+start a second worker; await the original call before an explicit retry. A valid
+terminal receipt that wins arbitration before cancellation still finishes source-
+first cleanup; headers alone never qualify. No next request may start on the closed
+generation. This is logical request arbitration, not physical-network unsending.
+
+`diagnostics` is an immutable, I/O-free snapshot with per-instance cumulative
+`acceptedEventCount`, `rejectedEventCount`, `disabledEventCount`,
+`identityBlockedEventCount`, `identityFailureCount`, `persistenceFailureCount`,
+`transportFailureCount`, `cancellationCount`, `isAdmissionReady`, `isFlushActive`
+and fixed `lastError`. Disabled tracks count only as disabled. Rejected events are
+not accepted. Storage failures count operations, not lost events; cancellation is
+not a server failure. The full diagnostics snapshot is not uploaded and does not
+prove remote loss. `droppedEventCount` is separately store-cumulative from the
+capacity ledger; `lastHeartbeat` and `lastSuccessfulUpload` are instance-local.
+Only `httpFailure(Int)` carries external detail, never URLs, SAS, event text, UUIDs
+or underlying errors.
+
+Heartbeats contain only app/build/version, pending batch count, durable dropped
+event count, last confirmed-upload timestamp and fixed transport state. The SDK
+owns the reserved event name; public callers cannot forge it. Versions require
+the policy's `versions` allowlist. Startup admits locally, then the owned weak
+timer ticks every 86,400 seconds while running; uploads still need `flush()`.
+Disabled heartbeats remain local only. No background wakeup or missed-day backfill
+is promised. Field names, sentinel values and count scope are in [USAGE](../../ai/USAGE.md).
+
+The strict Blob path refuses actual read/decode/type errors, symlink entries,
+unknown/noncanonical source names and evidenced missing live source/journal
+obligations. It does not import a legacy queue. It cannot detect an externally
+deleted unindexed file after process exit, recover failed-write memory after exit,
+or defend against arbitrary hostile concurrent filesystem mutation. Recognized
+sidecars without a source/live obligation remain inert, not recovered or deleted.
+Unsafe historical data stays blocked; no migration, metadata pruning or skip-ahead
+export is added. `maxDiskBytes` defaults to 50 MiB across the entire Blob store,
+not per epoch. It reuses queue oversized-event rejection, oldest-batch eviction,
+durable counters and sidecar-first paired quota cleanup. Captured snapshots defer
+eviction until flush release; source/sidecar reservations then reconcile without
+rewriting any epoch's unvalidated dirty payload. The quota does not bound memory,
+catalog/ledger metadata or atomic-write transients. Use the store exclusively and
+retain it when rolling back. Legacy-wide privacy adoption, release and actual
+product/rollback validation remain separate work.
+
+## Azure Blob internal transport core
+
+`AzureBlobTransport` remains **internal**, reused by the explicit public Adapter
+above, not a released consumer entry point. Loki APIs, defaults and wire bytes are
+unchanged. Product configuration and observability rollout still require separate
+work. This internal core enforces its own
 default-deny policy; generic `TelemetryEvent.properties` do **not** inherit
 `LokiLogSink` filtering. No consumer rollout is established here.
 

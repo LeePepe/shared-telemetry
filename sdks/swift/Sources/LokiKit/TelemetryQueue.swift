@@ -6,6 +6,65 @@ import Synchronization
 final class TelemetryQueue: Sendable {
     typealias Batch = (id: UUID, events: [TelemetryEvent])
 
+    /// Blob identity epochs share one byte budget, not one budget per reset.
+    /// Lock order: service → capacity group → queue. No callbacks/network work here.
+    final class CapacityGroup: @unchecked Sendable {
+        private final class Member {
+            weak var queue: TelemetryQueue?
+            init(_ queue: TelemetryQueue) { self.queue = queue }
+        }
+        private let lock = NSLock()
+        private var members: [Member] = []
+
+        fileprivate func synchronized<T>(_ body: () throws -> T) rethrows -> T {
+            lock.lock()
+            defer { lock.unlock() }
+            return try body()
+        }
+        fileprivate func register(_ queue: TelemetryQueue) {
+            synchronized { members.append(Member(queue)) }
+        }
+        // All following methods execute inside synchronized, excluding the already-locked queue.
+        fileprivate func otherBytes(excluding queue: TelemetryQueue) throws -> Int {
+            try members.compactMap(\.queue).filter { $0 !== queue }.reduce(0) { bytes, member in
+                try member.state.withLock {
+                    try member.loadInventory(state: &$0)
+                    return bytes + member.diskBytes($0)
+                }
+            }
+        }
+        fileprivate func hasPinnedSnapshot(excluding queue: TelemetryQueue) -> Bool {
+            members.compactMap(\.queue).contains { member in
+                member !== queue && member.state.withLock { $0.flushing && $0.snapshotTaken }
+            }
+        }
+        fileprivate func evictEarlier(than queue: TelemetryQueue) throws -> Bool {
+            for member in members.compactMap(\.queue) {
+                if member === queue { break }
+                let removed = try member.state.withLock { value -> Bool in
+                    try member.loadInventory(state: &value)
+                    try member.finishEvictions(state: &value)
+                    guard let id = member.evictionOrder(value).first else { return false }
+                    try member.evict(id, state: &value)
+                    return true
+                }
+                if removed { return true }
+            }
+            return false
+        }
+        fileprivate func finishDeferred(retryingWrites: Bool) {
+            synchronized {
+                // A concurrent enqueue in another epoch can also have deferred capacity.
+                guard !members.compactMap(\.queue).contains(where: {
+                    $0.state.withLock { $0.flushing && $0.snapshotTaken }
+                }) else { return }
+                for member in members.compactMap(\.queue) {
+                    member.finishDeferredCapacity(retryingWrites: retryingWrites)
+                }
+            }
+        }
+    }
+
     private struct CapacityLedger: Codable {
         var droppedEvents = 0
         var removing: Set<UUID> = []
@@ -41,8 +100,18 @@ final class TelemetryQueue: Sendable {
     private static let eventsPerBatch = 64
     let storeDirectory: URL
     let maxDiskBytes: Int
+    private let strictReadErrors: Bool
+    private let capacityGroup: CapacityGroup?
 
-    init(storeDirectory: URL? = nil, maxDiskBytes: Int = 50 * 1024 * 1024) {
+    private func withState<T: Sendable>(_ body: (inout State) throws -> T) rethrows -> T {
+        if let capacityGroup { return try capacityGroup.synchronized { try state.withLock { try body(&$0) } } }
+        return try state.withLock { try body(&$0) }
+    }
+
+    init(storeDirectory: URL? = nil, maxDiskBytes: Int = 50 * 1024 * 1024, strictReadErrors: Bool = false,
+         capacityGroup: CapacityGroup? = nil) {
+        self.capacityGroup = capacityGroup
+        self.strictReadErrors = strictReadErrors
         precondition(maxDiskBytes > 0, "maxDiskBytes must be positive")
         self.maxDiskBytes = maxDiskBytes
         let appSupport = FileManager.default.urls(
@@ -54,16 +123,24 @@ final class TelemetryQueue: Sendable {
         // permission to overwrite an unreadable loss record with a zero count.
         let capacity = try? readCapacity()
         state.withLock { $0.capacity = capacity }
+        capacityGroup?.register(self)
     }
 
     var persistenceFailureCount: Int { state.withLock { $0.persistenceFailures } }
     var droppedEventCount: Int { state.withLock { Self.addDrops($0.capacity?.droppedEvents ?? 0, $0.unrecordedDrops) } }
 
+    func pendingBatchCount() throws -> Int {
+        try withState { value in
+            let stored = try readBatches(state: &value)
+            return Set(stored.map(\.id)).union(value.pending.map(\.id)).count
+        }
+    }
+
     // Transport-owned durable receipt files participate in the same operation counter.
     func recordPersistenceFailure() { state.withLock { $0.persistenceFailures += 1 } }
 
     func enqueue(_ event: TelemetryEvent) {
-        state.withLock { value in
+        withState { value in
             if let data = try? encode([event]), data.count > maxDiskBytes {
                 value.unrecordedDrops = Self.addDrops(value.unrecordedDrops, 1)
                 do { try synchronizeCapacity(state: &value) }
@@ -100,7 +177,7 @@ final class TelemetryQueue: Sendable {
     }
 
     func beginFlush() -> Bool {
-        state.withLock { value in
+        withState { value in
             guard !value.flushing else { return false }
             value.flushing = true
             value.snapshotTaken = false
@@ -110,9 +187,17 @@ final class TelemetryQueue: Sendable {
     }
 
     func endFlush() {
-        state.withLock { value in
+        let retryingWrites = withState { value in
             value.flushing = false
             value.snapshotTaken = false
+            return value.retryWritesAfterFlush
+        }
+        if let capacityGroup { capacityGroup.finishDeferred(retryingWrites: retryingWrites) }
+        else { finishDeferredCapacity(retryingWrites: retryingWrites) }
+    }
+
+    private func finishDeferredCapacity(retryingWrites: Bool) {
+        state.withLock { value in
             guard value.capacityDeferred else { return }
             value.capacityDeferred = false
             if let reservation = value.deferredSidecar {
@@ -141,7 +226,7 @@ final class TelemetryQueue: Sendable {
             // A Blob flush may stop before validating later dirty batches. Keep
             // its no-rewrite snapshot policy through cleanup, including enqueues
             // after the snapshot; eviction itself does not persist payloads.
-            guard value.retryWritesAfterFlush else { return }
+            guard retryingWrites && value.retryWritesAfterFlush else { return }
             for batch in value.pending where value.dirty.contains(batch.id) {
                 do {
                     try writeBatch(id: batch.id, events: batch.events, state: &value)
@@ -155,7 +240,7 @@ final class TelemetryQueue: Sendable {
 
     /// Non-destructive after quota reconciliation. Concurrent enqueues belong to a later flush.
     func batchesForFlush(retryingWrites: Bool = true) throws -> [Batch] {
-        state.withLock { value in
+        try withState { value in
             defer { if value.flushing { value.snapshotTaken = true } }
             if value.flushing && !retryingWrites { value.retryWritesAfterFlush = false }
             // Freeze file contents before transport; concurrent tracks start a new batch.
@@ -182,6 +267,7 @@ final class TelemetryQueue: Sendable {
             } catch {
                 // The read already counted its failure. Storage unavailability must not
                 // prevent transport from delivering the retained memory originals.
+                if strictReadErrors { throw error }
                 return value.pending
             }
             var evicted: Set<UUID> = []
@@ -189,7 +275,9 @@ final class TelemetryQueue: Sendable {
                 try loadInventory(state: &value)
                 if !value.snapshotTaken {
                     try finishEvictions(state: &value)
-                    while diskBytes(value) > maxDiskBytes, let oldest = evictionOrder(value).first {
+                    while try totalDiskBytes(value) > maxDiskBytes {
+                        if try capacityGroup?.evictEarlier(than: self) == true { continue }
+                        guard let oldest = evictionOrder(value).first else { break }
                         // Even if physical deletion fails, the durable tombstone
                         // excludes this ID from the just-read snapshot below.
                         evicted.insert(oldest)
@@ -210,7 +298,7 @@ final class TelemetryQueue: Sendable {
     }
 
     func persistBatch(id: UUID, events: [TelemetryEvent]) throws {
-        try state.withLock { value in
+        try withState { value in
             do {
                 try writeBatch(id: id, events: events, state: &value)
             } catch let error as CapacityError {
@@ -223,13 +311,13 @@ final class TelemetryQueue: Sendable {
     }
 
     func loadPersistedBatches() throws -> [Batch] {
-        try state.withLock { try readBatches(state: &$0) }
+        try withState { try readBatches(state: &$0) }
     }
 
     // Blob's durable request participates in the same quota and lock as source
     // writes. The caller retains its existing error mapping/counter ownership.
     func persistBlobSidecar(id: UUID, data: Data) throws {
-        try state.withLock { value in
+        try withState { value in
             try loadInventory(state: &value)
             guard (value.inventory?[id]?.source ?? 0) > 0 else { throw CapacityError.evicted }
             try makeRoom(id: id, bytes: data.count, sidecar: true, state: &value)
@@ -239,7 +327,7 @@ final class TelemetryQueue: Sendable {
     }
 
     func removeBlobSidecar(id: UUID) throws {
-        try state.withLock { value in
+        try withState { value in
             do { try FileManager.default.removeItem(at: storeDirectory.appendingPathComponent("\(id).azure-blob")) }
             catch { if !isNotFound(error) { throw error } }
             value.inventory?[id]?.sidecar = 0
@@ -249,7 +337,7 @@ final class TelemetryQueue: Sendable {
 
     /// Only called after confirmed transport success. Failed removal remains retryable.
     func removeBatch(id: UUID) throws {
-        try state.withLock { value in
+        try withState { value in
             do {
                 try FileManager.default.removeItem(at: file(id))
             } catch {
@@ -287,8 +375,8 @@ final class TelemetryQueue: Sendable {
         try finishEvictions(state: &value)
         let previous = sidecar ? (value.inventory?[id]?.sidecar ?? 0) : (value.inventory?[id]?.source ?? 0)
         let ownFootprint = (value.inventory?[id]?.source ?? 0) + (sidecar ? bytes : 0)
-        if value.flushing && value.snapshotTaken {
-            let needsEviction = diskBytes(value) - previous > maxDiskBytes - bytes
+        if (value.flushing && value.snapshotTaken) || capacityGroup?.hasPinnedSnapshot(excluding: self) == true {
+            let needsEviction = try totalDiskBytes(value) - previous > maxDiskBytes - bytes
             if needsEviction || ownFootprint > maxDiskBytes {
                 value.capacityDeferred = true
                 if sidecar { value.deferredSidecar = (id, bytes) }
@@ -300,7 +388,8 @@ final class TelemetryQueue: Sendable {
             try evict(id, state: &value)
             throw CapacityError.evicted
         }
-        while diskBytes(value) - previous > maxDiskBytes - bytes {
+        while try totalDiskBytes(value) - previous > maxDiskBytes - bytes {
+            if try capacityGroup?.evictEarlier(than: self) == true { continue }
             guard let oldest = evictionOrder(value).first else {
                 throw CocoaError(.fileWriteOutOfSpace)
             }
@@ -318,6 +407,9 @@ final class TelemetryQueue: Sendable {
     private var capacityFile: URL { storeDirectory.appendingPathComponent(".queue-capacity") }
 
     private func readCapacity() throws -> CapacityLedger {
+        if strictReadErrors, let kind = try entryType(capacityFile), kind != .typeRegular {
+            throw AzureBlobError.invalidStoredBatch
+        }
         do {
             let capacity = try JSONDecoder().decode(CapacityLedger.self, from: Data(contentsOf: capacityFile))
             guard capacity.droppedEvents >= 0 else { throw CocoaError(.fileReadCorruptFile) }
@@ -375,6 +467,10 @@ final class TelemetryQueue: Sendable {
 
     private func diskBytes(_ value: State) -> Int {
         (value.inventory ?? [:]).values.reduce(0) { $0 + $1.source + $1.sidecar }
+    }
+
+    private func totalDiskBytes(_ value: State) throws -> Int {
+        try diskBytes(value) + (capacityGroup?.otherBytes(excluding: self) ?? 0)
     }
 
     private func evictionOrder(_ value: State) -> [UUID] {
@@ -438,6 +534,12 @@ final class TelemetryQueue: Sendable {
     }
 
     private func readBatches(state value: inout State) throws -> [Batch] {
+        if strictReadErrors {
+            do {
+                if value.capacity == nil { value.capacity = try readCapacity() }
+                return try readStrictBatches(state: value)
+            } catch { value.persistenceFailures += 1; throw error }
+        }
         let files: [URL]
         do {
             files = try FileManager.default.contentsOfDirectory(
@@ -468,6 +570,62 @@ final class TelemetryQueue: Sendable {
             }
         }
         return batches
+    }
+
+    private func readStrictBatches(state value: State) throws -> [Batch] {
+        if let kind = try entryType(storeDirectory), kind != .typeDirectory { throw AzureBlobError.invalidStoredBatch }
+        let entries: [URL]
+        do {
+            entries = try FileManager.default.contentsOfDirectory(at: storeDirectory,
+                includingPropertiesForKeys: [.creationDateKey], options: [])
+        } catch {
+            guard isNotFound(error) else { throw error }
+            // A catalog-only epoch or a failed first write need not have a directory.
+            guard value.pending.allSatisfy({ value.dirty.contains($0.id) }) else { throw AzureBlobError.persistenceFailure }
+            return []
+        }
+        var sources: [(id: UUID, url: URL, date: Date)] = []
+        var journals = Set<UUID>()
+        for entry in entries {
+            if entry.lastPathComponent == ".queue-capacity" {
+                guard try entryType(entry) == .typeRegular else { throw AzureBlobError.invalidStoredBatch }
+                continue // #27 loss ledger is validated by readCapacity before this read.
+            }
+            guard try entryType(entry) == .typeRegular,
+                  let id = UUID(uuidString: entry.deletingPathExtension().lastPathComponent),
+                  entry.deletingPathExtension().lastPathComponent == id.uuidString else {
+                throw AzureBlobError.invalidStoredBatch
+            }
+            switch entry.pathExtension {
+            case "json":
+                let date = try entry.resourceValues(forKeys: [.creationDateKey]).creationDate ?? .distantPast
+                if value.capacity?.removing.contains(id) != true { sources.append((id, entry, date)) }
+            case "azure-blob": journals.insert(id) // Without a source/live obligation, remains inert.
+            default: throw AzureBlobError.invalidStoredBatch
+            }
+        }
+        let sourceIDs = Set(sources.map(\.id))
+        for batch in value.pending where !sourceIDs.contains(batch.id) {
+            guard value.dirty.contains(batch.id), !journals.contains(batch.id) else { throw AzureBlobError.persistenceFailure }
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try sources.sorted { $0.date < $1.date }.map { source in
+            let bytes = try Data(contentsOf: source.url) // A just-enumerated missing source is a real read failure.
+            do {
+                guard let records = try JSONSerialization.jsonObject(with: bytes) as? [[String: Any]],
+                      records.allSatisfy({ Set($0.keys) == ["name", "properties", "timestamp"] }) else {
+                    throw AzureBlobError.invalidStoredBatch
+                }
+                return (source.id, try decoder.decode([TelemetryEvent].self, from: bytes))
+            }
+            catch { throw AzureBlobError.invalidStoredBatch }
+        }
+    }
+
+    private func entryType(_ url: URL) throws -> FileAttributeType? {
+        do { return try FileManager.default.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType }
+        catch { if isNotFound(error) { return nil }; throw error }
     }
 
     private func creationDate(of url: URL) -> Date {
