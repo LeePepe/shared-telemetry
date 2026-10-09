@@ -12,7 +12,7 @@
       "required": ["entry", "usage", "integration", "examples", "compatibility", "migration", "changelog"],
       "properties": {"entry": {"const": "README.md"}, "usage": {"const": "USAGE.md"}, "integration": {"const": "INTEGRATION.md"}, "examples": {"const": "EXAMPLES.md"}, "compatibility": {"const": "COMPATIBILITY.md"}, "migration": {"const": "MIGRATION.md"}, "changelog": {"const": "CHANGELOG.md"}}
     },
-    "capabilities": {"type": "array", "minItems": 10, "maxItems": 10,
+    "capabilities": {"type": "array", "minItems": 15, "maxItems": 15,
       "items": {"type": "object", "additionalProperties": false, "required": ["symbol", "source"],
         "properties": {"symbol": {"type": "string"}, "source": {"type": "string"}}
       }

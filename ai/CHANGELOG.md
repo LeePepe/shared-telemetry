@@ -1,5 +1,17 @@
 # Swift release changes
 
+## Unreleased — public Azure Blob telemetry
+
+- Add explicit-consent `AzureBlobTelemetryService`, content-free diagnostics/errors
+  and public finite-number/closed-label policy; reject whole unsafe events before enqueue.
+- Bind backlog to durable identity/build epochs, preserving disable/cancellation,
+  failed-reset readiness, recreation and winning-receipt cleanup.
+- Reuse the configurable 50 MiB policy across all epochs, including durable drops,
+  deferred source/sidecar reservations and no unvalidated cleanup payload rewrites.
+- Retain the 32 MiB response-memory guard and observed-progress pacing.
+  No dependency, legacy adapter, format, tag or published-version change.
+  These candidate additions are not in released 0.1.0.
+
 ## Unreleased — queue disk capacity
 
 - Add a host-configurable `maxDiskBytes` initializer input to `LokiTelemetryService`,

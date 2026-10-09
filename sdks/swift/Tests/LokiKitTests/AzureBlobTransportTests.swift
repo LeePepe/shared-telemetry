@@ -8,6 +8,551 @@ import Darwin
 @testable import LokiKit
 
 final class AzureBlobTransportTests: XCTestCase {
+    func testPublicCrossEpochCapacityCleanupDoesNotRewriteLaterDirtyPayload() async throws {
+        let entered = expectation(description: "old epoch at real request-start cut")
+        let gate = BlobTimingGate(entered: entered)
+        defer { gate.release() }
+        let identities = Mutex([UUID(), UUID()])
+        let telemetry = try AzureBlobTelemetryService(containerURL: http.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
+            app: "sample", build: "test build+1", privacy: Self.fixturePrivacy, storeDirectory: directory,
+            isEnabled: true, identityProvider: { identities.withLock { $0.removeFirst() } },
+            configuration: http.session.configuration,
+            synchronization: BlobRequestSynchronization(beforeRequestStart: { await gate.wait() }), maxDiskBytes: 1200)
+        telemetry.track(name: "synthetic.first", properties: ["count": "1"])
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [entered], timeout: 3)
+        telemetry.resetIdentifier()
+        for _ in 0..<8 { telemetry.track(name: "synthetic.first", properties: ["count": "1234567890"]) }
+        let before = try publicStoreBytes()
+        let sources = before.filter { $0.key.hasSuffix(".json") && $0.key != "catalog.json" }
+        XCTAssertEqual(sources.count, 2, "Fixture has both the old source and a newer durable prefix")
+        XCTAssertEqual(telemetry.diagnostics.droppedEventCount, 0, "Captured old snapshot is protected")
+        telemetry.isEnabled = false
+        gate.release()
+        await flushing.value
+        let after = try publicStoreBytes()
+        XCTAssertEqual(telemetry.diagnostics.droppedEventCount, 1)
+        for (name, bytes) in sources where after[name] != nil {
+            XCTAssertEqual(after[name], bytes, "Quota cleanup cannot rewrite another epoch's unvalidated memory suffix")
+        }
+        XCTAssertTrue(http.requests.isEmpty)
+        telemetry.isEnabled = true
+        await telemetry.flush()
+        // A source+sidecar pair that cannot fit is explicitly evicted, not retried forever.
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+        XCTAssertEqual(telemetry.diagnostics.droppedEventCount, 9)
+    }
+
+    func testPublicRegisteredCancellationIsCountedAfterWorkerFinalizesBeforeHandlerAccounting() async throws {
+        let atStart = expectation(description: "worker stopped at real Cut S")
+        let closed = expectation(description: "caller closed its real control before service accounting")
+        let finalized = expectation(description: "worker actually released its active generation")
+        let startGate = BlobTimingGate(entered: atStart)
+        let releaseAccounting = DispatchSemaphore(value: 0)
+        defer { startGate.release(); releaseAccounting.signal() }
+        let resumed = Mutex(0)
+        let finished = Mutex(0)
+        let telemetry = try publicService(synchronization: BlobRequestSynchronization(
+            afterCallerControlCancelled: {
+                closed.fulfill()
+                XCTAssertEqual(releaseAccounting.wait(timeout: .now() + 5), .success)
+            }, afterGenerationFinished: {
+                if finished.withLock({ $0 += 1; return $0 == 1 }) { finalized.fulfill() }
+            }, beforeRequestStart: { await startGate.wait() }, observeStart: { event in
+                if case .didInvokeResume = event { resumed.withLock { $0 += 1 } }
+            }))
+        telemetry.track(name: "synthetic.first", properties: ["count": "1"])
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [atStart], timeout: 3)
+        let retained = try publicStoreBytes()
+        // Cancellation handling is synchronous. Pause only this owned caller thread,
+        // outside SDK locks; the real worker must remain free to finish independently.
+        let cancelling = Task.detached { flushing.cancel() }
+        await fulfillment(of: [closed], timeout: 3)
+        startGate.release()
+        await fulfillment(of: [finalized], timeout: 3)
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+        releaseAccounting.signal()
+        await cancelling.value
+        await flushing.value
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1,
+            "Clearing active must not erase accounting for a registered cancelled flush")
+        XCTAssertEqual(resumed.withLock { $0 }, 0)
+        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertEqual(try publicStoreBytes(), retained)
+        XCTAssertEqual(telemetry.diagnostics.transportFailureCount, 0)
+        flushing.cancel() // Repeated cancellation cannot count this operation twice.
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+        await telemetry.flush()
+        XCTAssertEqual(http.requests.count, 1)
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+    }
+
+    func testPublicUnregisteredCancelledCallersDoNotCountOrCancelActiveFlush() async throws {
+        let atStart = expectation(description: "registered owner's request stopped at Cut S")
+        let gate = BlobTimingGate(entered: atStart)
+        defer { gate.release() }
+        let telemetry = try publicService(synchronization: BlobRequestSynchronization(beforeRequestStart: { await gate.wait() }))
+        telemetry.track(name: "synthetic.first", properties: ["count": "1"])
+        let preCancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            await telemetry.flush()
+        }
+        await preCancelled.value
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 0)
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [atStart], timeout: 3)
+        let overlapping = Task {
+            await telemetry.flush() // No registration while the original generation owns the slot.
+            withUnsafeCurrentTask { $0?.cancel() }
+            await telemetry.flush() // Pre-cancelled overlapping call also owns no generation.
+        }
+        await overlapping.value
+        XCTAssertTrue(telemetry.diagnostics.isFlushActive)
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 0)
+        gate.release()
+        await flushing.value
+        XCTAssertEqual(http.requests.count, 1)
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 0)
+        XCTAssertNil(telemetry.diagnostics.lastError)
+        XCTAssertEqual(Set(try publicStoreBytes().keys), ["catalog.json", ".owner-lock"])
+    }
+
+    func testPublicDisableThenCallerCancellationCountsOneRegisteredOperation() async throws {
+        let atStart = expectation(description: "registered generation before request creation")
+        let gate = BlobTimingGate(entered: atStart)
+        defer { gate.release() }
+        let telemetry = try publicService(synchronization: BlobRequestSynchronization(beforeRequestStart: { await gate.wait() }))
+        telemetry.track(name: "synthetic.first", properties: ["count": "1"])
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [atStart], timeout: 3)
+        let retained = try publicStoreBytes()
+        telemetry.isEnabled = false
+        flushing.cancel()
+        gate.release()
+        await flushing.value
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.lastError, .cancelled)
+        XCTAssertEqual(telemetry.diagnostics.transportFailureCount, 0)
+        XCTAssertEqual(try publicStoreBytes(), retained)
+        XCTAssertTrue(http.requests.isEmpty)
+        telemetry.isEnabled = true
+        await telemetry.flush()
+        XCTAssertEqual(http.requests.count, 1)
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+    }
+
+    func testPublicWorkerInvalidCatalogCauseSurvivesDisableBeforeErrorHandling() async throws {
+        try await assertWorkerStoreFailureSurvivesDisable(corruptCatalog: true)
+    }
+
+    func testPublicWorkerPersistenceCauseSurvivesDisableBeforeErrorHandling() async throws {
+        try await assertWorkerStoreFailureSurvivesDisable(corruptCatalog: false)
+    }
+
+    private func assertWorkerStoreFailureSurvivesDisable(corruptCatalog: Bool) async throws {
+        let detected = expectation(description: "worker's real store validation failed before outer error handling")
+        let gate = BlobTimingGate(entered: detected)
+        defer { gate.release() }
+        let telemetry = try publicService(synchronization: BlobRequestSynchronization(beforeWorkerErrorHandling: { await gate.wait() }))
+        telemetry.track(name: "synthetic.first", properties: ["count": "1"])
+        if corruptCatalog {
+            try Data("synthetic-invalid-catalog".utf8).write(to: directory.appendingPathComponent("catalog.json"))
+        }
+        let retained = try publicStoreBytes()
+        if !corruptCatalog {
+            // Named files remain accessible, but real epoch enumeration gets EACCES.
+            try FileManager.default.setAttributes([.posixPermissions: 0o300], ofItemAtPath: directory.path)
+        }
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [detected], timeout: 3)
+        if !corruptCatalog { try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
+        let cause: AzureBlobTelemetryError = corruptCatalog ? .invalidStore : .persistenceFailure
+        XCTAssertEqual(telemetry.diagnostics.lastError, cause, "The detecting operation must first record its real cause")
+        XCTAssertFalse(telemetry.diagnostics.isAdmissionReady)
+        XCTAssertTrue(telemetry.diagnostics.isFlushActive)
+        XCTAssertEqual(telemetry.diagnostics.persistenceFailureCount, 1)
+        telemetry.isEnabled = false // Real public invalidation in the worker's two-lock gap.
+        XCTAssertEqual(telemetry.diagnostics.lastError, cause, "Generic cancellation cannot replace established integrity failure")
+        gate.release()
+        await flushing.value
+        XCTAssertEqual(telemetry.diagnostics.lastError, cause)
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.persistenceFailureCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.transportFailureCount, 0)
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+        XCTAssertEqual(try publicStoreBytes(), retained)
+        XCTAssertTrue(http.requests.isEmpty)
+        telemetry.isEnabled = true
+        await telemetry.flush()
+        XCTAssertEqual(telemetry.diagnostics.lastError, cause)
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+        XCTAssertTrue(http.requests.isEmpty)
+    }
+
+    func testPublicCallerCancellationDuringGenerationRegistrationRefusesActualStart() async throws {
+        let registered = expectation(description: "public caller paused after generation publication")
+        let atStart = expectation(description: "worker at Cut S before task creation")
+        let attempted = expectation(description: "real start arbitration finished")
+        let registrationGate = BlobTimingGate(entered: registered)
+        let startGate = BlobTimingGate(entered: atStart)
+        defer { registrationGate.release(); startGate.release() }
+        let observations = Mutex((resumed: 0, finished: 0))
+        let synchronization = BlobRequestSynchronization(
+            afterGenerationRegistered: { await registrationGate.wait() },
+            beforeRequestStart: { await startGate.wait() }, observeStart: { event in
+                let firstFinish = observations.withLock { value -> Bool in
+                    switch event {
+                    case .didInvokeResume: value.resumed += 1; return false
+                    case .didFinishStartAttempt: value.finished += 1; return value.finished == 1
+                    }
+                }
+                if firstFinish { attempted.fulfill() }
+            })
+        let telemetry = try publicService(synchronization: synchronization)
+        telemetry.track(name: "synthetic.first", properties: ["count": "1"])
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [registered, atStart], timeout: 3)
+        let before = try publicStoreBytes()
+        flushing.cancel()
+        startGate.release()
+        await fulfillment(of: [attempted], timeout: 3)
+        registrationGate.release()
+        await flushing.value
+        XCTAssertEqual(observations.withLock { $0.resumed }, 0)
+        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertEqual(try publicStoreBytes(), before)
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.transportFailureCount, 0)
+        await telemetry.flush()
+        XCTAssertEqual(http.requests.count, 1, "A later uncancelled caller can flush the retained work")
+    }
+
+    func testPublicDisableAtCutSRefusesActualResumeBeforeTaskCreation() async throws {
+        let entered = expectation(description: "Cut S before Foundation task exists")
+        let finished = expectation(description: "actual start attempt returned")
+        let gate = BlobTimingGate(entered: entered)
+        defer { gate.release() }
+        let observations = Mutex((resumed: 0, finished: 0))
+        let synchronization = BlobRequestSynchronization(beforeRequestStart: { await gate.wait() }, observeStart: { event in
+            let firstFinish = observations.withLock { value -> Bool in
+                switch event {
+                case .didInvokeResume: value.resumed += 1; return false
+                case .didFinishStartAttempt: value.finished += 1; return value.finished == 1
+                }
+            }
+            if firstFinish { finished.fulfill() }
+        })
+        let telemetry = try publicService(synchronization: synchronization)
+        telemetry.track(name: "synthetic.first", properties: ["count": "1"])
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [entered], timeout: 3)
+        let before = try publicStoreBytes()
+        telemetry.isEnabled = false
+        telemetry.track(name: "synthetic.first", properties: ["count": "2"])
+        gate.release()
+        await fulfillment(of: [finished], timeout: 3)
+        await flushing.value
+        XCTAssertEqual(observations.withLock { $0.resumed }, 0, "No actual resume may follow disable winning at Cut S")
+        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertEqual(try publicStoreBytes(), before)
+        XCTAssertEqual(telemetry.diagnostics.acceptedEventCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.disabledEventCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+        telemetry.isEnabled = true
+        await telemetry.flush()
+        XCTAssertEqual(http.requests.count, 1)
+        XCTAssertEqual(observations.withLock { $0.resumed }, 1)
+    }
+
+    func testPublicReceiptWinsAtCutTButDisabledGenerationCannotSendNextBatch() async throws {
+        let entered = expectation(description: "real terminal receipt claimed before handoff")
+        let gate = BlobTimingGate(entered: entered)
+        defer { gate.release() }
+        let telemetry = try publicService(synchronization: BlobRequestSynchronization(afterReceiptCommitted: { await gate.wait() }))
+        for index in 0..<65 { telemetry.track(name: "synthetic.first", properties: ["count": String(index)]) }
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [entered], timeout: 3)
+        XCTAssertEqual(http.requests.count, 1)
+        XCTAssertEqual(try publicStoreBytes().keys.filter { $0.hasSuffix(".json") && $0 != "catalog.json" }.count, 2)
+        telemetry.isEnabled = false
+        XCTAssertTrue(telemetry.diagnostics.isFlushActive)
+        XCTAssertThrowsError(try publicService(synchronization: nil)) { XCTAssertEqual($0 as? AzureBlobTelemetryError, .storeInUse) }
+        telemetry.isEnabled = true
+        await telemetry.flush() // Old generation still owns the lease/active slot; no overlap.
+        XCTAssertEqual(http.requests.count, 1)
+        telemetry.isEnabled = false
+        gate.release()
+        await flushing.value
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+        XCTAssertEqual(http.requests.count, 1)
+        let remaining = try publicStoreBytes().filter { $0.key.hasSuffix(".json") && $0.key != "catalog.json" }
+        XCTAssertEqual(remaining.count, 1, "Winning receipt cleans its source even after later cancellation")
+        XCTAssertTrue(String(decoding: try XCTUnwrap(remaining.values.first), as: UTF8.self).contains("\"64\""))
+        XCTAssertEqual(telemetry.diagnostics.transportFailureCount, 0)
+        telemetry.isEnabled = true
+        await telemetry.flush()
+        XCTAssertEqual(http.requests.count, 2)
+        XCTAssertEqual(try gunzip(requestBody(XCTUnwrap(http.requests.last))).filter { $0 == 0x0a }.count, 1)
+    }
+
+    func testPublicImmutableOverwriteWinsRealTerminalCutAndRetainsLeaseThroughHandoff() async throws {
+        let entered = expectation(description: "exact overwrite receipt won terminal arbitration")
+        let gate = BlobTimingGate(entered: entered)
+        defer { gate.release() }
+        var telemetry: AzureBlobTelemetryService? = try publicService(
+            synchronization: BlobRequestSynchronization(afterReceiptCommitted: { await gate.wait() }))
+        telemetry?.track(name: "synthetic.first", properties: ["count": "1"])
+        http.state.withLock { $0.error = URLError(.timedOut) }
+        await telemetry?.flush()
+        let first = try XCTUnwrap(http.requests.first)
+        http.state.withLock { $0.error = nil; $0.status = 403; $0.headers = ["x-ms-error-code": "UnauthorizedBlobOverwrite"] }
+        var flushing: Task<Void, Never>? = Task { [owner = try XCTUnwrap(telemetry)] in await owner.flush() }
+        await fulfillment(of: [entered], timeout: 3)
+        XCTAssertEqual(http.requests.count, 2)
+        XCTAssertEqual(http.requests.last?.url, first.url)
+        XCTAssertEqual(try requestBody(XCTUnwrap(http.requests.last)), try requestBody(first))
+        telemetry?.isEnabled = false
+        telemetry = nil
+        XCTAssertThrowsError(try publicService(synchronization: nil)) { XCTAssertEqual($0 as? AzureBlobTelemetryError, .storeInUse) }
+        gate.release()
+        await flushing?.value
+        flushing = nil
+        let restored = try publicService(synchronization: nil)
+        await restored.flush()
+        XCTAssertEqual(http.requests.count, 2, "No retransmission after already-won receipt cleanup")
+        XCTAssertEqual(try publicStoreBytes().keys.filter { $0.hasSuffix(".json") && $0 != "catalog.json" }.count, 0)
+    }
+
+    func testPublicResetAdoptsExactReplacementWhenAtomicWriteReportsFailure() async throws {
+        let identities = Mutex([UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
+            UUID(uuidString: "22222222-2222-4222-8222-222222222222")!])
+        let telemetry = try AzureBlobTelemetryService(containerURL: http.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
+            app: "sample", build: "test build+1", privacy: Self.fixturePrivacy, storeDirectory: directory,
+            isEnabled: true, identityProvider: { identities.withLock { $0.removeFirst() } },
+            configuration: http.session.configuration, synchronization: nil, atomicWriteFault: .reportFailureAfterReplacement)
+        telemetry.track(name: "synthetic.first", properties: ["count": "1"])
+        let prior = try Data(contentsOf: directory.appendingPathComponent("catalog.json"))
+        telemetry.resetIdentifier()
+        XCTAssertNotEqual(try Data(contentsOf: directory.appendingPathComponent("catalog.json")), prior)
+        XCTAssertEqual(telemetry.diagnostics.persistenceFailureCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.lastError, .persistenceFailure)
+        XCTAssertTrue(telemetry.diagnostics.isAdmissionReady)
+        telemetry.track(name: "synthetic.first", properties: ["count": "2"])
+        await telemetry.flush()
+        XCTAssertEqual(http.requests.compactMap { $0.url?.pathComponents[5] }, [
+            "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+        ])
+    }
+
+    func testPublicResetBlocksWhenReconciliationReadFailsThenRecreationUsesActualCatalog() async throws {
+        let identities = Mutex([UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
+            UUID(uuidString: "22222222-2222-4222-8222-222222222222")!])
+        var telemetry: AzureBlobTelemetryService? = try AzureBlobTelemetryService(
+            containerURL: http.container, sasQuery: "sr=c&sp=c&sig=synthetic-only", app: "sample", build: "test build+1",
+            privacy: Self.fixturePrivacy, storeDirectory: directory, isEnabled: true,
+            identityProvider: { identities.withLock { $0.removeFirst() } }, configuration: http.session.configuration,
+            synchronization: nil, atomicWriteFault: .unavailableReconciliationRead)
+        telemetry?.track(name: "synthetic.first", properties: ["count": "1"])
+        telemetry?.resetIdentifier()
+        XCTAssertFalse(try XCTUnwrap(telemetry?.diagnostics.isAdmissionReady))
+        XCTAssertEqual(telemetry?.diagnostics.persistenceFailureCount, 2, "Failed write result and failed readback are distinct operations")
+        XCTAssertEqual(telemetry?.diagnostics.lastError, .invalidStore)
+        let retained = try publicStoreBytes()
+        telemetry?.track(name: "synthetic.first", properties: ["count": "99"])
+        await telemetry?.flush()
+        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertEqual(try publicStoreBytes(), retained)
+        telemetry = nil
+        let restored = try AzureBlobTelemetryService(containerURL: http.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
+            app: "sample", build: "test build+1", privacy: Self.fixturePrivacy, storeDirectory: directory,
+            isEnabled: true, identityProvider: { throw AzureBlobTelemetryError.identityUnavailable }, configuration: http.session.configuration)
+        restored.track(name: "synthetic.first", properties: ["count": "2"])
+        await restored.flush()
+        XCTAssertEqual(http.requests.compactMap { $0.url?.pathComponents[5] }, [
+            "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+        ])
+        XCTAssertEqual(restored.diagnostics.acceptedEventCount, 1)
+    }
+
+    func testPublicInvalidResetAtCutSClosesActiveGenerationAndPreservesIntegrityError() async throws {
+        let entered = expectation(description: "request stopped before real task creation")
+        let finished = expectation(description: "start refusal observed")
+        let gate = BlobTimingGate(entered: entered)
+        defer { gate.release() }
+        let observations = Mutex((resumed: 0, finished: 0))
+        let ids = Mutex([UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
+            UUID(uuidString: "22222222-2222-4222-8222-222222222222")!])
+        let telemetry = try AzureBlobTelemetryService(containerURL: http.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
+            app: "sample", build: "test build+1", privacy: Self.fixturePrivacy, storeDirectory: directory,
+            isEnabled: true, identityProvider: { ids.withLock { $0.removeFirst() } },
+            configuration: http.session.configuration, synchronization: BlobRequestSynchronization(
+                beforeRequestStart: { await gate.wait() }, observeStart: { event in
+                    let firstFinish = observations.withLock { value -> Bool in
+                        switch event {
+                        case .didInvokeResume: value.resumed += 1; return false
+                        case .didFinishStartAttempt: value.finished += 1; return value.finished == 1
+                        }
+                    }
+                    if firstFinish { finished.fulfill() }
+                }), atomicWriteFault: .unavailableReconciliationRead)
+        for index in 0..<65 { telemetry.track(name: "synthetic.first", properties: ["count": String(index)]) }
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [entered], timeout: 3)
+        telemetry.resetIdentifier()
+        XCTAssertFalse(telemetry.diagnostics.isAdmissionReady)
+        XCTAssertEqual(telemetry.diagnostics.lastError, .invalidStore)
+        XCTAssertEqual(telemetry.diagnostics.persistenceFailureCount, 2)
+        let retained = try publicStoreBytes()
+        gate.release()
+        await fulfillment(of: [finished], timeout: 3)
+        await flushing.value
+        XCTAssertEqual(observations.withLock { $0.resumed }, 0)
+        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertEqual(try publicStoreBytes(), retained)
+        XCTAssertEqual(telemetry.diagnostics.lastError, .invalidStore, "Cancellation must not hide the integrity failure")
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.transportFailureCount, 0)
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+        await telemetry.flush()
+        XCTAssertTrue(http.requests.isEmpty)
+    }
+
+    func testPublicTrackDetectsInvalidCatalogAtCutSAndRefusesActualStart() async throws {
+        let entered = expectation(description: "Cut S before catalog corruption")
+        let finished = expectation(description: "actual start decision observed")
+        let gate = BlobTimingGate(entered: entered)
+        defer { gate.release() }
+        let observations = Mutex((resumed: 0, finished: 0))
+        let telemetry = try publicService(synchronization: BlobRequestSynchronization(
+            beforeRequestStart: { await gate.wait() }, observeStart: { event in
+                let firstFinish = observations.withLock { value -> Bool in
+                    switch event {
+                    case .didInvokeResume: value.resumed += 1; return false
+                    case .didFinishStartAttempt: value.finished += 1; return value.finished == 1
+                    }
+                }
+                if firstFinish { finished.fulfill() }
+            }))
+        telemetry.track(name: "synthetic.first", properties: ["count": "1"])
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [entered], timeout: 3)
+        try Data("synthetic-invalid-catalog".utf8).write(to: directory.appendingPathComponent("catalog.json"))
+        let retained = try publicStoreBytes()
+        telemetry.track(name: "synthetic.first", properties: ["count": "99"])
+        XCTAssertEqual(telemetry.diagnostics.lastError, .invalidStore)
+        gate.release()
+        await fulfillment(of: [finished], timeout: 3)
+        await flushing.value
+        XCTAssertEqual(observations.withLock { $0.resumed }, 0)
+        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertEqual(try publicStoreBytes(), retained)
+        XCTAssertEqual(telemetry.diagnostics.lastError, .invalidStore)
+        XCTAssertEqual(telemetry.diagnostics.acceptedEventCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.persistenceFailureCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+        XCTAssertFalse(telemetry.diagnostics.isAdmissionReady)
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+    }
+
+    func testPublicTrackInvalidationAtCutTPreservesWonCleanupButRefusesNextBatch() async throws {
+        let entered = expectation(description: "real receipt won before invalid store detection")
+        let gate = BlobTimingGate(entered: entered)
+        defer { gate.release() }
+        let telemetry = try publicService(synchronization: BlobRequestSynchronization(afterReceiptCommitted: { await gate.wait() }))
+        for index in 0..<65 { telemetry.track(name: "synthetic.first", properties: ["count": String(index)]) }
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [entered], timeout: 3)
+        XCTAssertEqual(http.requests.count, 1)
+        try Data("synthetic-invalid-catalog".utf8).write(to: directory.appendingPathComponent("catalog.json"))
+        telemetry.track(name: "synthetic.first", properties: ["count": "99"])
+        XCTAssertEqual(telemetry.diagnostics.lastError, .invalidStore)
+        XCTAssertTrue(telemetry.diagnostics.isFlushActive)
+        gate.release()
+        await flushing.value
+        XCTAssertEqual(http.requests.count, 1, "Invalidation must close the remaining captured batch snapshot")
+        let remaining = try publicStoreBytes().filter { $0.key.hasSuffix(".json") && $0.key != "catalog.json" }
+        XCTAssertEqual(remaining.count, 1, "Only the already-won receipt permits cleanup")
+        XCTAssertTrue(String(decoding: try XCTUnwrap(remaining.values.first), as: UTF8.self).contains("\"64\""))
+        XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("catalog.json")), Data("synthetic-invalid-catalog".utf8))
+        XCTAssertEqual(telemetry.diagnostics.lastError, .invalidStore)
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.transportFailureCount, 0)
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+    }
+
+    func testPublicCallerCancellationAtCutTKeepsWonCleanupAndClosesNextStart() async throws {
+        let entered = expectation(description: "receipt won before caller cancellation")
+        let gate = BlobTimingGate(entered: entered)
+        defer { gate.release() }
+        let telemetry = try publicService(synchronization: BlobRequestSynchronization(afterReceiptCommitted: { await gate.wait() }))
+        for index in 0..<65 { telemetry.track(name: "synthetic.first", properties: ["count": String(index)]) }
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [entered], timeout: 3)
+        flushing.cancel()
+        XCTAssertTrue(telemetry.diagnostics.isFlushActive)
+        XCTAssertThrowsError(try publicService(synchronization: nil)) { XCTAssertEqual($0 as? AzureBlobTelemetryError, .storeInUse) }
+        gate.release()
+        await flushing.value
+        XCTAssertEqual(http.requests.count, 1)
+        let remaining = try publicStoreBytes().filter { $0.key.hasSuffix(".json") && $0.key != "catalog.json" }
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertTrue(String(decoding: try XCTUnwrap(remaining.values.first), as: UTF8.self).contains("\"64\""))
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.transportFailureCount, 0)
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+        await telemetry.flush()
+        XCTAssertEqual(http.requests.count, 2)
+        XCTAssertEqual(try gunzip(requestBody(XCTUnwrap(http.requests.last))).filter { $0 == 0x0a }.count, 1)
+    }
+
+    func testPublicDuplicateResetAtCutSDoesNotCancelSoundActiveBacklog() async throws {
+        let entered = expectation(description: "sound backlog paused at Cut S")
+        let gate = BlobTimingGate(entered: entered)
+        defer { gate.release() }
+        let telemetry = try publicService(synchronization: BlobRequestSynchronization(beforeRequestStart: { await gate.wait() }))
+        telemetry.track(name: "synthetic.first", properties: ["count": "1"])
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [entered], timeout: 3)
+        let retained = try publicStoreBytes()
+        telemetry.resetIdentifier() // Provider returns the original UUID; catalog remains sound.
+        XCTAssertEqual(telemetry.diagnostics.lastError, .duplicateIdentity)
+        XCTAssertFalse(telemetry.diagnostics.isAdmissionReady)
+        XCTAssertEqual(try publicStoreBytes(), retained)
+        gate.release()
+        await flushing.value
+        XCTAssertEqual(http.requests.count, 1)
+        XCTAssertEqual(http.requests.first?.url?.pathComponents[5], "11111111-1111-4111-8111-111111111111")
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 0)
+        XCTAssertEqual(telemetry.diagnostics.lastError, .duplicateIdentity)
+        XCTAssertFalse(telemetry.diagnostics.isAdmissionReady)
+        XCTAssertFalse(telemetry.diagnostics.isFlushActive)
+        XCTAssertEqual(Set(try publicStoreBytes().keys), ["catalog.json", ".owner-lock"])
+    }
+
+    private func publicService(synchronization: BlobRequestSynchronization?) throws -> AzureBlobTelemetryService {
+        try AzureBlobTelemetryService(containerURL: http.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
+            app: "sample", build: "test build+1", privacy: Self.fixturePrivacy, storeDirectory: directory,
+            isEnabled: true, identityProvider: { UUID(uuidString: "11111111-1111-4111-8111-111111111111")! },
+            configuration: http.session.configuration, synchronization: synchronization)
+    }
+
+    private func publicStoreBytes() throws -> [String: Data] {
+        let enumeration = try XCTUnwrap(FileManager.default.enumerator(atPath: directory.path))
+        var files: [String: Data] = [:]
+        for case let relative as String in enumeration {
+            let file = directory.appendingPathComponent(relative)
+            if try FileManager.default.attributesOfItem(atPath: file.path)[.type] as? FileAttributeType == .typeRegular {
+                files[relative] = try Data(contentsOf: file)
+            }
+        }
+        return files
+    }
+
     private var directory: URL!
     private var http: BlobHTTPFixture!
 
@@ -1013,6 +1558,40 @@ final class AzureBlobTransportTests: XCTestCase {
 private struct CapturedBlobRequest: Codable {
     let url: URL
     let body: Data
+}
+
+private final class BlobTimingGate: Sendable {
+    private struct State {
+        var entered = false
+        var released = false
+        var continuation: CheckedContinuation<Void, Never>?
+    }
+    private let state = Mutex(State())
+    private let entered: XCTestExpectation
+    init(entered: XCTestExpectation) { self.entered = entered }
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            let result = state.withLock { value -> (notify: Bool, resume: Bool) in
+                let notify = !value.entered
+                value.entered = true
+                if value.released { return (notify, true) }
+                precondition(value.continuation == nil)
+                value.continuation = continuation
+                return (notify, false)
+            }
+            if result.notify { entered.fulfill() }
+            if result.resume { continuation.resume() }
+        }
+    }
+    func release() {
+        let continuation = state.withLock { value in
+            value.released = true
+            let continuation = value.continuation
+            value.continuation = nil
+            return continuation
+        }
+        continuation?.resume()
+    }
 }
 
 // Only routing is shared; each fixture owns its session, requests and response behavior.

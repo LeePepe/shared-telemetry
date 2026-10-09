@@ -1,10 +1,10 @@
 import Foundation
 
-/// Internal, instance-owned acceptance rules. Names, keys and closed values must
+/// Instance-owned acceptance rules. Names, keys and closed values must
 /// be reviewed code/config constants, never populated from the events themselves.
 /// Numeric syntax and UUID shape cannot establish the meaning/provenance of data.
-struct AzureBlobPrivacyPolicy: Sendable {
-    enum ValueRule: Sendable {
+public struct AzureBlobPrivacyPolicy: Sendable {
+    public enum ValueRule: Sendable {
         case finiteNumber
         case label(Set<String>)
 
@@ -24,7 +24,7 @@ struct AzureBlobPrivacyPolicy: Sendable {
     let apps: Set<String>
     let builds: Set<String>
 
-    init(events: [String: [String: ValueRule]] = [:], apps: Set<String> = [], builds: Set<String> = []) {
+    public init(events: [String: [String: ValueRule]] = [:], apps: Set<String> = [], builds: Set<String> = []) {
         self.events = events
         self.apps = apps
         self.builds = builds
