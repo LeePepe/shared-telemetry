@@ -392,6 +392,95 @@ final class AzureBlobTransportTests: XCTestCase {
         XCTAssertTrue(http.requests.isEmpty)
     }
 
+    func testCapacityFailureCannotRewriteLaterUnsafeDirtyBatchBeforeValidation() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory, maxDiskBytes: 512)
+        let instant = Date(timeIntervalSince1970: 1_700_000_000)
+        queue.enqueue(TelemetryEvent(name: "synthetic.safe", properties: ["duration": "1"], timestamp: instant))
+        let first = try XCTUnwrap(queue.batchesForFlush(retryingWrites: false).first)
+        queue.enqueue(TelemetryEvent(name: "synthetic.safe", properties: ["duration": "2"], timestamp: instant))
+        let later = try XCTUnwrap(queue.loadPersistedBatches().first { $0.id != first.id })
+        let laterFile = directory.appendingPathComponent("\(later.id).json")
+        let safePrefix = try Data(contentsOf: laterFile)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
+        queue.enqueue(TelemetryEvent(name: "synthetic.safe",
+            properties: ["phase": "synthetic-user-text-CANARY"], timestamp: instant))
+        XCTAssertEqual(queue.persistenceFailureCount, 1)
+        XCTAssertEqual(try Data(contentsOf: laterFile), safePrefix)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+
+        // The first batch's sidecar cannot fit. The later batch has not yet
+        // reached privacy validation when that capacity failure ends the flush.
+        do { try await transport(privacy: privacyPolicy).flush(queue); XCTFail("Sidecar must exceed capacity") }
+        catch { XCTAssertEqual(error as? AzureBlobError, .persistenceFailure) }
+        XCTAssertEqual(try Data(contentsOf: laterFile), safePrefix, "Cleanup must not persist an unvalidated suffix")
+        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertEqual(queue.droppedEventCount, 1, "Only the first batch is evicted")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(first.id).json").path))
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .contains { $0.pathExtension == "azure-blob" })
+        XCTAssertEqual(try queue.batchesForFlush(retryingWrites: false).flatMap(\.events).count, 2)
+
+        do { try await transport(privacy: privacyPolicy).flush(queue); XCTFail("The retained suffix still needs validation") }
+        catch { XCTAssertEqual(error as? AzureBlobError, .privacyRejected) }
+        XCTAssertEqual(try Data(contentsOf: laterFile), safePrefix)
+        XCTAssertTrue(http.requests.isEmpty)
+        let restarted = TelemetryQueue(storeDirectory: directory, maxDiskBytes: 512)
+        XCTAssertEqual(restarted.droppedEventCount, 1)
+        XCTAssertEqual(try restarted.loadPersistedBatches().flatMap(\.events).map(\.properties), [["duration": "2"]])
+    }
+
+    func testDeferredDirtySourceCapacityEvictsOldestBatchAndNextBlobFlushProgresses() async throws {
+        let queue = TelemetryQueue(storeDirectory: directory, maxDiskBytes: 2_048)
+        let instant = Date(timeIntervalSince1970: 1_700_000_000)
+        let oldest = TelemetryEvent(name: "synthetic.safe", properties: ["duration": "1"], timestamp: instant)
+        for _ in 0..<10 { queue.enqueue(oldest) }
+        let oldestID = try XCTUnwrap(queue.loadPersistedBatches().first?.id)
+        let oldestFile = directory.appendingPathComponent("\(oldestID).json")
+        let prefix = try Data(contentsOf: oldestFile)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
+        for _ in 0..<10 { queue.enqueue(oldest) }
+        XCTAssertEqual(queue.persistenceFailureCount, 10)
+        _ = try queue.batchesForFlush(retryingWrites: false) // Seal A without persisting its suffix.
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        for _ in 0..<4 {
+            queue.enqueue(TelemetryEvent(name: "synthetic.safe", properties: ["duration": "2"], timestamp: instant))
+        }
+        XCTAssertEqual(try Data(contentsOf: oldestFile), prefix)
+        XCTAssertEqual(try queue.loadPersistedBatches().flatMap(\.events).count, 14)
+        XCTAssertEqual(queue.droppedEventCount, 0, "A's prefix plus B fits, but full A plus B does not")
+
+        let sender = try transport(privacy: privacyPolicy)
+        do { try await sender.flush(queue); XCTFail("The full-source write must need quota reconciliation") }
+        catch { XCTAssertFalse(error is CancellationError) }
+        XCTAssertTrue(http.requests.isEmpty, "No upload before complete source persistence")
+        XCTAssertEqual(queue.droppedEventCount, 20, "Evict all of A, including its dirty suffix, once")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldestFile.path))
+        XCTAssertEqual(try queue.loadPersistedBatches().flatMap(\.events).map(\.properties),
+                       Array(repeating: ["duration": "2"], count: 4))
+
+        do { try await sender.flush(queue) }
+        catch { XCTFail("The next flush must progress past the evicted source: \(error)") }
+        XCTAssertEqual(http.requests.count, 1)
+        if let request = http.requests.first {
+            let lines = try gunzip(requestBody(request)).split(separator: 0x0a)
+            let properties = try lines.map {
+                try XCTUnwrap((JSONSerialization.jsonObject(with: Data($0)) as? [String: Any])?["properties"] as? [String: String])
+            }
+            XCTAssertEqual(properties, Array(repeating: ["duration": "2"], count: 4))
+        }
+        XCTAssertTrue(try queue.batchesForFlush(retryingWrites: false).isEmpty)
+        XCTAssertEqual(queue.droppedEventCount, 20)
+        XCTAssertEqual(queue.persistenceFailureCount, 10, "Quota deferral does not add a filesystem failure")
+        let restarted = TelemetryQueue(storeDirectory: directory, maxDiskBytes: 2_048)
+        XCTAssertTrue(try restarted.loadPersistedBatches().isEmpty)
+        XCTAssertEqual(restarted.droppedEventCount, 20)
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .contains { $0.pathExtension == "azure-blob" })
+    }
+
     func testStricterPolicyBlocksFrozenJournalWithoutChangingBytesOrAcknowledgingOverwrite() async throws {
         let queue = TelemetryQueue(storeDirectory: directory)
         queue.enqueue(TelemetryEvent(name: "synthetic.safe", properties: ["duration": "1.25", "phase": "done"]))

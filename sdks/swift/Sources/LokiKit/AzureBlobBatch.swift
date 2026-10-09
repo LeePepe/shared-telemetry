@@ -42,8 +42,8 @@ struct AzureBlobBatch: Codable {
     func save(queue: TelemetryQueue) throws {
         do {
             let payload = try JSONEncoder().encode(self)
-            try JSONEncoder().encode(Stored(payload: payload, checksum: Self.digest(payload)))
-                .write(to: Self.file(queueID, queue: queue), options: .atomic)
+            let data = try JSONEncoder().encode(Stored(payload: payload, checksum: Self.digest(payload)))
+            try queue.persistBlobSidecar(id: queueID, data: data)
         } catch {
             queue.recordPersistenceFailure()
             throw AzureBlobError.persistenceFailure
@@ -51,7 +51,7 @@ struct AzureBlobBatch: Codable {
     }
 
     func remove(queue: TelemetryQueue) throws {
-        do { try FileManager.default.removeItem(at: Self.file(queueID, queue: queue)) }
+        do { try queue.removeBlobSidecar(id: queueID) }
         catch {
             if Self.isAbsent(error) { return }
             queue.recordPersistenceFailure()

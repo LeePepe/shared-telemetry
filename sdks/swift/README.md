@@ -16,7 +16,7 @@ These are manifest requirements, not tested combinations or an assertion of rele
 | [PrintLogger](Sources/LokiKit/PrintLogger.swift) | Console output; `init(subsystem:minimumLevel:)` defaults to empty subsystem and `.debug`; `configureRemoteSink(_:)` controls an optional process-wide mirror for all instances |
 | [TelemetryEvent and TelemetryService](Sources/LokiKit/TelemetryService.swift) | Event name, string properties, timestamp; `isEnabled`, `track(_:)`, `track(name:properties:)`, no-properties convenience, `flush() async`, `resetIdentifier()` |
 | `NoopTelemetryService` | No-op implementation, initially disabled |
-| [LokiTelemetryService](Sources/LokiKit/LokiTelemetryService.swift) | Loki event transport, synchronous enqueue persistence and read-only `persistenceFailureCount`; `resetIdentifier()` is a no-op |
+| [LokiTelemetryService](Sources/LokiKit/LokiTelemetryService.swift) | Loki event transport, synchronous enqueue persistence, configurable `maxDiskBytes`, read-only `persistenceFailureCount` and `droppedEventCount`; `resetIdentifier()` is a no-op |
 | [LokiLogSink](Sources/LokiKit/LokiLogSink.swift) | Separate, bounded, filtered log mirror; `record`, `start(flushInterval:)`, `flush() async` |
 | [TelemetryDeckService](Sources/LokiKit/TelemetryDeckService.swift) | Adapter to TelemetryDeck, not Loki |
 | [TelemetryService performance extensions](Sources/LokiKit/TelemetryService+Performance.swift) | Sync/async `measure`, `measureStart`, `measureEnd`; record `duration_ms` timing and append `.failed` to failure event names, without automatically extracting error descriptions |
@@ -26,7 +26,7 @@ These are manifest requirements, not tested combinations or an assertion of rele
 
 ## Loki event telemetry
 
-`LokiTelemetryService(endpoint:appLabels:isEnabled:authToken:storeDirectory:)` requires a `URL`; labels default to `[:]`, enabled to `true`, token and store directory to `nil`. Supply a consumer-owned isolated store directory when planning a drill; the default uses Application Support's `telemetry/pending` (temporary-directory fallback), not a per-endpoint namespace.
+`LokiTelemetryService(endpoint:appLabels:isEnabled:authToken:storeDirectory:maxDiskBytes:)` requires a `URL`; labels default to `[:]`, enabled to `true`, token and store directory to `nil`. The optional positive `maxDiskBytes` defaults to **50 MiB (52,428,800 bytes)**, independently of `LokiLogSink`; a host can override it in the initializer. Supply a consumer-owned isolated store directory when planning a drill; the default uses Application Support's `telemetry/pending` (temporary-directory fallback), not a per-endpoint namespace. These additions are unreleased source, not APIs in tag `v0.1.0`.
 
 Illustrative/source-reviewed, not executed: this construction and event call use synthetic values. The reserved domain is a placeholder, not a working receiver. Construction can create a directory; this is not a runnable validation recipe.
 
@@ -53,15 +53,23 @@ func attemptFlush(telemetry: LokiTelemetryService) async {
 }
 ```
 
-In the unreleased source, enabled `track` synchronously attempts an atomic JSON write before returning. An immediately following `flush()` includes those events in its snapshot; it is still not a delivery receipt. File I/O blocks the calling thread. Internal batches rotate after 64 events, so enqueue rewrites at most that many events without scanning or rewriting the accumulated backlog. Full batches remain queued until delivery; rotation does not evict events or bound total storage or individual event size. Storage speed and event size still affect latency; no wall-clock bound is guaranteed. The caller owns flush scheduling. This slice does not choose a disk cap, oversized-event policy or overflow counters.
+In the unreleased source, enabled `track` synchronously attempts an atomic JSON write before returning, subject to the capacity policy below. An immediately following `flush()` includes retained events in its snapshot; it is still not a delivery receipt. File I/O blocks the calling thread. Internal batches rotate after 64 events or before a combined batch would exceed the byte limit. Ordinary enqueue rewrites only its active batch; a cached file-size inventory and overflow-time ordering avoid decoding the entire backlog on every enqueue. Storage speed and event size still affect latency; no wall-clock bound is guaranteed. The caller owns flush scheduling.
 
-`flush()` retries pending writes, then snapshots recovered batches whose IDs are not in this instance's memory first, in file-creation order. Current-instance batches follow in their original enqueue order, including memory-only fallback; a known ID uses its full memory original once, not its possibly incomplete disk copy. Retrying an older atomic write cannot move that live batch behind a newer one. If directory reading fails, that failure is counted and retained memory events can still be sent. A batch is removed only after HTTP success. A failed send or removal stops that flush and retains pending work. Concurrent flush calls on one instance do not duplicate in-flight work; events tracked during transport form a separate batch for a later flush. A store directory must have one live service owner; no cross-instance/process locking is provided.
+The cap covers the logical byte lengths of owned UUID-named source JSON files **plus Blob sidecars**, not filesystem allocation units, transient atomic-write copies, the small loss ledger or other files in the directory. A single event whose one-element legacy JSON array exceeds the cap is discarded before admission and counted once; existing backlog is not evicted to admit an impossible event. At the limit, data is accepted. On overflow, the queue evicts **whole oldest batches**, counting their events rather than files; it may free more bytes than strictly necessary. Recovered batches use the existing file-creation ordering (UUID breaks equal-date eviction ties), followed by current-instance batches in enqueue order. It does not rewrite a partially journaled Blob request into a smaller batch or assign it a new identity.
+
+The first flush snapshot also applies the configured cap to recovered backlog. An owned flush then protects its captured source/sidecar identities: new writes that would require eviction remain dirty in memory until that flush ends, without growing the persisted queue. Confirmed delivery frees capacity without counting a loss; otherwise pending capacity work is reconciled after release. A Blob sidecar that cannot fit is not written or sent; its existing persistence error stops that flush, then quota reconciliation can evict the oldest batch. Construction and disabled calls do not purge backlog. This is a disk-data bound, not a bound on failed/deferred memory fallback or a guarantee that an unreadable/undeletable pre-existing store can immediately be brought below a newly reduced limit.
+
+`droppedEventCount` is a read-only, store-cumulative count of capacity rejections and logical evictions, restored on recreation and saturating at `Int.max`. It does not count disabled calls, successful delivery or network failures. A hidden `.queue-capacity` record commits the count and selected batch IDs before deletion; those tombstones are never replayed or recounted after restart. Cleanup removes the sidecar before its source and retries on later writes/flushes. Failure to commit the tombstone leaves the batch unchanged; failure to unlink retains a tombstoned file rather than pretending deletion succeeded or exceeding the cap with a new write. Wrong file types are retained, not recursively removed. This is scoped eviction cleanup, not general filesystem repair.
+
+Counter persistence failures retain newly rejected-event counts in memory for retry, but process exit before a successful retry can lose those increments. An unreadable loss record is retained and fails storage operations instead of being overwritten with a fabricated zero; its prior total is unavailable until a read succeeds. Reads of the counters perform no I/O. Keep all queue files and the ledger together under one owner; external edits/deletions or older writers ignoring tombstones are unsupported. Atomic writes cover ordinary process termination, not power-loss/fsync durability.
+
+`flush()` retries pending writes, then snapshots retained recovered batches whose IDs are not in this instance's memory first, in file-creation order. Current-instance batches follow in their original enqueue order, including memory-only fallback; a known ID uses its full memory original once, not its possibly incomplete disk copy. Retrying an older atomic write cannot move that live batch behind a newer one. If directory reading fails, that failure is counted and retained memory events can still be sent. Apart from explicit capacity eviction, a batch is removed only after HTTP success. A failed send or delivery removal stops that flush and retains pending work. Concurrent flush calls on one instance do not duplicate in-flight work; events tracked during transport form a separate batch for a later flush. A store directory must have one live service owner; no cross-instance/process locking is provided.
 
 This is not a universal FIFO guarantee. After restart all recovered batches use the legacy file-creation ordering, not event timestamps or a persisted enqueue sequence. Atomic replacement can refresh creation dates; equal or unavailable dates have no defined relative order. Unreadable files are retained and counted but do not block healthy batches.
 
 `persistenceFailureCount` counts failed storage operations (write, directory/read/decode, removal) for the current service instance, not lost events or failed uploads. Each failed attempt counts once, retries may increase it, successful operations do not reset it, and reading it performs no I/O. It resets with a new instance. A genuinely absent store or already-absent removed file is benign; permission errors are not treated as absence. Failed enqueue writes retain the original in memory for retry, but those events can still be lost on process exit. Corrupt files remain on disk and each failed read attempt is counted; healthy batches can still load. Disabling `isEnabled` blocks new tracks and flush attempts without erasing pending data.
 
-The disk format remains UUID-named JSON arrays using the existing ISO-8601 dates. Older batches can replay, and the previous SDK can decode new files on rollback. As before, disk replay has whole-second timestamp precision; live memory retains original timestamps. Successful atomic writes cover process termination after `track` returns, not power loss/fsync guarantees, failed storage, unlimited retention or exactly-once delivery. Ambiguous HTTP outcomes and failed removals can cause duplicates. Keep unsent files when rolling back; no cleanup or migration is performed automatically.
+The event disk format remains UUID-named JSON arrays using the existing ISO-8601 dates. Older batches can replay, and the previous SDK can decode retained event files on rollback. Older SDKs do not understand the loss ledger: resolve pending eviction cleanup before rollback, otherwise they may replay tombstoned files. As before, disk replay has whole-second timestamp precision; live memory retains original timestamps. Successful atomic event writes cover process termination after `track` returns, not power loss/fsync guarantees, failed/deferred storage, unlimited retention or exactly-once delivery. Ambiguous HTTP outcomes and failed delivery removals can cause duplicates. Keep retained unsent files when rolling back; capacity losses are irreversible.
 
 The shipper sets a ten-second request timeout and accepts HTTP 2xx. It groups streams by event name; lines contain the name when properties are empty, otherwise sorted `key=value` text. This is not the Web/Python JSON envelope.
 
@@ -91,7 +99,7 @@ lifecycle. Syntax, finite numbers or UUID shape cannot prove provenance: an acco
 UUID, sensitive numeric measurement or user-derived label does not become safe by
 passing a parser. No general event-identifier rule or product vocabulary is added.
 
-Blob obtains a non-writing queue snapshot, validates all events in each batch
+Blob obtains a quota-reconciled queue snapshot without retrying event writes, validates all events in each retained batch
 before encoding or transport persistence, and only then attempts durable writes.
 On restart it revalidates source events and stored path against the current policy.
 It also decompresses the entire saved gzip stream and requires byte equality with
@@ -105,10 +113,11 @@ batch stops that flush and can block later safe backlog until its policy or data
 disposition is explicitly resolved; this is not automatic recovery or disposal.
 
 This is an export/journal guard, **not** a privacy guarantee for the generic queue.
-Legacy `TelemetryQueue` and public Loki/TelemetryDeck admission/default behavior
-are unchanged: unsafe content they already accepted can remain in memory or raw
-JSON files. This core neither admits new events nor erases those files. A rejected
-dirty suffix remains in memory without a Blob-triggered rewrite; process exit can
+Generic `TelemetryQueue` and public Loki admission still do not filter content;
+TelemetryDeck is unchanged. Unsafe content already accepted can remain in memory
+or raw JSON files unless the independent queue capacity policy evicts it. The core
+does not provide ingress filtering. A rejected dirty suffix remains in memory
+without a Blob-triggered rewrite unless quota eviction selects its batch; process exit can
 still lose a previously failed generic enqueue, as documented above. Public
 ingress protection, compatible adoption/migration and disposal of unsafe retained
 records remain separate work. Rolling back to an older exporter can remove this
@@ -134,7 +143,7 @@ whether the exact overwrite code matched are retained by the receipt handler.
 Headers alone do not acknowledge delivery: successful terminal task completion is
 required, and a later network error or cancellation keeps the batch pending even
 after 201/overwrite headers. No intentional header-only cancellation, response
-size policy or queue-capacity policy is introduced. Cancellation and completion
+size policy is introduced by the response handler. Queue capacity is enforced separately. Cancellation and completion
 atomically take a single continuation; a cancelled flush releases its task/session
 and later flushes can retry normally. Existing request timeouts remain unchanged;
 this bounds application-retained response state, not total network traffic or
@@ -177,13 +186,13 @@ write-ahead record prevents sending; storage failures use the existing queue
 counter. This is not an exactly-once or absolute no-loss guarantee.
 
 Legacy UUID JSON event arrays stay readable without migration; older Loki code
-ignores sidecars and can still replay those arrays, with its existing duplicate
-risks. Retain unsent files when rolling back. Removal happens source-first only
-after confirmed delivery; interruption or sidecar-removal failure at that point
+ignores sidecars and loss tombstones and can replay those arrays, with duplicate
+and rollback risks described above. Retain unsent files when rolling back.
+Confirmed-delivery removal happens source-first; interruption or sidecar-removal failure at that point
 can leave an inert sidecar, never deletion of unconfirmed source data. Automatic
-orphan cleanup, disk caps, oversized-event eviction, heartbeat/disabled reporting,
-public privacy filtering, release packaging and real consumer acceptance are not
-implemented by this slice. The current encoder retains data and fails preparation
+orphan repair, heartbeat/disabled reporting, public privacy filtering, release
+packaging and real consumer acceptance are not implemented by this internal core.
+Queue-owned quota eviction and paired cleanup are described above. The current encoder retains data and fails preparation
 if a single NDJSON body exceeds zlib's 32-bit input range; it does not evict events.
 
 ## Console logging and remote log mirror

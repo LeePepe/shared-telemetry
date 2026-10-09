@@ -1,5 +1,18 @@
 # Swift release changes
 
+## Unreleased — queue disk capacity
+
+- Add a host-configurable `maxDiskBytes` initializer input to `LokiTelemetryService`,
+  defaulting to 50 MiB; no dependency on `LokiLogSink` defaults.
+- Bound persisted event JSON plus Blob sidecars; reject individually oversized
+  events and evict whole oldest batches, with persistent `droppedEventCount`.
+- Journal evictions before paired cleanup so deletion failures and recreation
+  cannot replay or recount the selected loss. Preserve owned flush snapshots;
+  retry quota-deferred writes after the active flush releases them.
+- Retain legacy event/wire formats and transport receipt rules. The new loss
+  ledger must finish pending cleanup before rollback to an older reader.
+  No release, live integration or full verification is implied by this entry.
+
 ## Unreleased — durable event enqueue
 
 - Attempt atomic persistence before enabled `track` returns; retain failed writes
