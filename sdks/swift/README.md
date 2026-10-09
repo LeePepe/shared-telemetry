@@ -19,7 +19,7 @@ These are manifest requirements, not tested combinations or an assertion of rele
 | [LokiTelemetryService](Sources/LokiKit/LokiTelemetryService.swift) | Loki event transport, synchronous enqueue persistence, configurable `maxDiskBytes`, read-only `persistenceFailureCount` and `droppedEventCount`; `resetIdentifier()` is a no-op |
 | [LokiLogSink](Sources/LokiKit/LokiLogSink.swift) | Separate, bounded, filtered log mirror; `record`, `start(flushInterval:)`, `flush() async` |
 | [TelemetryDeckService](Sources/LokiKit/TelemetryDeckService.swift) | Adapter to TelemetryDeck, not Loki |
-| [AzureBlobTelemetryService](Sources/LokiKit/AzureBlobTelemetryService.swift) | Candidate Blob admission/identity/lifecycle and allowlist |
+| [AzureBlobTelemetryService](Sources/LokiKit/AzureBlobTelemetryService.swift) | Candidate Blob admission/identity/lifecycle, allowlist, heartbeat and host-bundle configuration |
 | [TelemetryService performance extensions](Sources/LokiKit/TelemetryService+Performance.swift) | Sync/async `measure`, `measureStart`, `measureEnd`; record `duration_ms` timing and append `.failed` to failure event names, without automatically extracting error descriptions |
 | [TelemetryEventName](Sources/LokiKit/VoxPocketTelemetryEventNames.swift) | Existing product-specific enum; its presence is an exception to the product-local semantics target, not a relocation already completed |
 
@@ -88,9 +88,17 @@ Construction requires an HTTPS container URL, create-only SAS query, app/build,
 trusted `protocolClasses` are captured from optional `configuration`; no caller
 delegate, credentials/cookies/headers/cache/proxy settings are inherited. No
 environment/Keychain lookup, implicit enabled default, default store, constructor
-upload or fallback Noop exists. Direct construction is timer-free.
-Invalid direct configuration throws a fixed
+upload or fallback Noop exists. The direct initializer is timer-free unless
+`heartbeatVersion` is supplied. Invalid direct configuration throws a fixed
 `AzureBlobTelemetryError` before identity provisioning/storage initialization.
+
+For standard host integration use the additive `bundle:app:build:version:…`
+initializer: it reads expanded `LokiKitBlobEndpoint`/`LokiKitBlobSAS` Info.plist
+strings and enables startup/daily `telemetry.heartbeat`. Missing configuration
+logs one fixed local warning per instance, exposes a disabled heartbeat, and
+does not provision identity/storage or send. See [build-setting wiring](../../ai/INTEGRATION.md#infoplist-and-build-settings).
+App/build/version must be trusted allowlisted constants. No runtime environment
+fallback or access to private configuration is implied.
 
 Illustrative explicit policy (not a live configuration or product vocabulary):
 
@@ -151,9 +159,17 @@ and fixed `lastError`. Disabled tracks count only as disabled. Rejected events a
 not accepted. Storage failures count operations, not lost events; cancellation is
 not a server failure. The full diagnostics snapshot is not uploaded and does not
 prove remote loss. `droppedEventCount` is separately store-cumulative from the
-capacity ledger.
+capacity ledger; `lastHeartbeat` and `lastSuccessfulUpload` are instance-local.
 Only `httpFailure(Int)` carries external detail, never URLs, SAS, event text, UUIDs
 or underlying errors.
+
+Heartbeats contain only app/build/version, pending batch count, durable dropped
+event count, last confirmed-upload timestamp and fixed transport state. The SDK
+owns the reserved event name; public callers cannot forge it. Versions require
+the policy's `versions` allowlist. Startup admits locally, then the owned weak
+timer ticks every 86,400 seconds while running; uploads still need `flush()`.
+Disabled heartbeats remain local only. No background wakeup or missed-day backfill
+is promised. Field names, sentinel values and count scope are in [USAGE](../../ai/USAGE.md).
 
 The strict Blob path refuses actual read/decode/type errors, symlink entries,
 unknown/noncanonical source names and evidenced missing live source/journal

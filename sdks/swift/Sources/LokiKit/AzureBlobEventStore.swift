@@ -39,6 +39,9 @@ final class AzureBlobEventStore: @unchecked Sendable {
             return sum.overflow ? Int.max : sum.partialValue
         }
     }
+    func pendingBatchCount() throws -> Int { try queues.values.reduce(0) { try $0 + $1.pendingBatchCount() } }
+    // The queue already counted this actual read failure; do not double-count it.
+    func invalidateAfterReadFailure() { isValid = false }
 
     init(root: URL, containerURL: URL, app: String, build: String,
          identityProvider: @Sendable () throws -> UUID, atomicWriteFault: AtomicWriteFault? = nil,

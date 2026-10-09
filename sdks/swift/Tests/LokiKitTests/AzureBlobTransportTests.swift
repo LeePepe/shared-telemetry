@@ -8,6 +8,67 @@ import Darwin
 @testable import LokiKit
 
 final class AzureBlobTransportTests: XCTestCase {
+    func testPublicHeartbeatPreservesOriginalPersistenceCauseOnLaterTicks() throws {
+        let tick = Mutex<(@Sendable () -> Void)?>(nil)
+        let clock = BlobHeartbeatClock(now: { Date(timeIntervalSince1970: 1_700_000_000) }, scheduleDaily: { callback in
+            tick.withLock { $0 = callback }
+            return { tick.withLock { $0 = nil } }
+        })
+        let telemetry = try AzureBlobTelemetryService(containerURL: http.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
+            app: "sample", build: "test build+1",
+            privacy: AzureBlobPrivacyPolicy(apps: ["sample"], builds: ["test build+1"], versions: ["1.2.3"]),
+            storeDirectory: directory, isEnabled: true, identityProvider: { UUID() },
+            configuration: http.session.configuration, synchronization: nil,
+            heartbeatVersion: "1.2.3", heartbeatClock: clock)
+        let source = try XCTUnwrap(try publicStoreBytes().keys.first { $0.hasSuffix(".json") && $0 != "catalog.json" })
+        let epoch = directory.appendingPathComponent(source).deletingLastPathComponent()
+        try FileManager.default.setAttributes([.posixPermissions: 0o300], ofItemAtPath: epoch.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: epoch.path) }
+        tick.withLock { $0 }?()
+        XCTAssertEqual(telemetry.diagnostics.lastError, .persistenceFailure)
+        XCTAssertFalse(telemetry.diagnostics.isAdmissionReady)
+        XCTAssertEqual(telemetry.diagnostics.persistenceFailureCount, 1)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: epoch.path)
+        tick.withLock { $0 }?()
+        XCTAssertEqual(telemetry.diagnostics.lastError, .persistenceFailure)
+        XCTAssertEqual(telemetry.diagnostics.persistenceFailureCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.lastHeartbeat?.properties["transport"], "failed")
+        XCTAssertTrue(http.requests.isEmpty)
+    }
+
+    func testPublicHeartbeatReadFailureClosesCapturedGenerationBeforeStart() async throws {
+        let entered = expectation(description: "real request has not been created")
+        let gate = BlobTimingGate(entered: entered)
+        defer { gate.release() }
+        let tick = Mutex<(@Sendable () -> Void)?>(nil)
+        let clock = BlobHeartbeatClock(now: { Date(timeIntervalSince1970: 1_700_000_000) }, scheduleDaily: { callback in
+            tick.withLock { $0 = callback }
+            return { tick.withLock { $0 = nil } }
+        })
+        let telemetry = try AzureBlobTelemetryService(containerURL: http.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
+            app: "sample", build: "test build+1",
+            privacy: AzureBlobPrivacyPolicy(apps: ["sample"], builds: ["test build+1"], versions: ["1.2.3"]),
+            storeDirectory: directory, isEnabled: true, identityProvider: { UUID() },
+            configuration: http.session.configuration,
+            synchronization: BlobRequestSynchronization(beforeRequestStart: { await gate.wait() }),
+            heartbeatVersion: "1.2.3", heartbeatClock: clock)
+        let flushing = Task { await telemetry.flush() }
+        await fulfillment(of: [entered], timeout: 3)
+        let source = try XCTUnwrap(try publicStoreBytes().keys.first { $0.hasSuffix(".json") && $0 != "catalog.json" })
+        try Data("synthetic-invalid-source".utf8).write(to: directory.appendingPathComponent(source))
+        let retained = try publicStoreBytes()
+        tick.withLock { $0 }?()
+        XCTAssertEqual(telemetry.diagnostics.lastError, .invalidStore)
+        XCTAssertFalse(telemetry.diagnostics.isAdmissionReady)
+        XCTAssertEqual(telemetry.diagnostics.lastHeartbeat?.properties["pending_batches"], "-1")
+        gate.release()
+        await flushing.value
+        XCTAssertTrue(http.requests.isEmpty)
+        XCTAssertEqual(try publicStoreBytes(), retained)
+        XCTAssertEqual(telemetry.diagnostics.cancellationCount, 1)
+        XCTAssertEqual(telemetry.diagnostics.lastError, .invalidStore)
+    }
+
     func testPublicCrossEpochCapacityCleanupDoesNotRewriteLaterDirtyPayload() async throws {
         let entered = expectation(description: "old epoch at real request-start cut")
         let gate = BlobTimingGate(entered: entered)
@@ -41,6 +102,55 @@ final class AzureBlobTransportTests: XCTestCase {
         // A source+sidecar pair that cannot fit is explicitly evicted, not retried forever.
         XCTAssertFalse(telemetry.diagnostics.isFlushActive)
         XCTAssertEqual(telemetry.diagnostics.droppedEventCount, 9)
+    }
+
+    func testPublicDailyHeartbeatUsesRealLossAndReceiptAndStopsWithOwner() async throws {
+        let instant = Mutex(Date(timeIntervalSince1970: 1_700_000_000))
+        let tick = Mutex<(@Sendable () -> Void)?>(nil)
+        let cancellations = Mutex(0)
+        let clock = BlobHeartbeatClock(now: { instant.withLock { $0 } }, scheduleDaily: { callback in
+            tick.withLock { $0 = callback }
+            return { tick.withLock { $0 = nil }; cancellations.withLock { $0 += 1 } }
+        })
+        let oversize = String(repeating: "x", count: 5_000)
+        var telemetry: AzureBlobTelemetryService? = try AzureBlobTelemetryService(
+            containerURL: http.container, sasQuery: "sr=c&sp=c&sig=synthetic-only",
+            app: "sample", build: "test build+1",
+            privacy: AzureBlobPrivacyPolicy(events: ["synthetic.large": ["label": .label([oversize])]],
+                apps: ["sample"], builds: ["test build+1"], versions: ["1.2.3"]),
+            storeDirectory: directory, isEnabled: true, identityProvider: { UUID() },
+            configuration: http.session.configuration, synchronization: nil, maxDiskBytes: 4096,
+            heartbeatVersion: "1.2.3", heartbeatClock: clock)
+        weak var weakTelemetry = telemetry
+        XCTAssertNotNil(tick.withLock { $0 }, "A daily clock must actually be installed")
+        telemetry?.track(name: "synthetic.large", properties: ["label": oversize])
+        XCTAssertEqual(telemetry?.diagnostics.droppedEventCount, 1)
+        await telemetry?.flush()
+        XCTAssertEqual(telemetry?.diagnostics.lastSuccessfulUpload, Date(timeIntervalSince1970: 1_700_000_000))
+        instant.withLock { $0 = Date(timeIntervalSince1970: 1_700_086_400) }
+        tick.withLock { $0 }?()
+        let heartbeat = try XCTUnwrap(telemetry?.diagnostics.lastHeartbeat)
+        XCTAssertEqual(heartbeat.timestamp, Date(timeIntervalSince1970: 1_700_086_400))
+        XCTAssertEqual(heartbeat.properties["dropped_events"], "1")
+        XCTAssertEqual(heartbeat.properties["pending_batches"], "0")
+        XCTAssertEqual(heartbeat.properties["last_successful_upload"], "1700000000.0")
+        XCTAssertEqual(heartbeat.properties["transport"], "enabled")
+        await telemetry?.flush()
+        XCTAssertEqual(http.requests.count, 2, "Startup and daily heartbeat each reach the real synthetic receiver")
+        let accepted = telemetry?.diagnostics.acceptedEventCount
+        let bytes = try publicStoreBytes()
+        telemetry?.isEnabled = false
+        instant.withLock { $0 = Date(timeIntervalSince1970: 1_700_172_800) }
+        tick.withLock { $0 }?()
+        XCTAssertEqual(telemetry?.diagnostics.lastHeartbeat?.properties["transport"], "disabled")
+        XCTAssertEqual(telemetry?.diagnostics.acceptedEventCount, accepted)
+        XCTAssertEqual(try publicStoreBytes(), bytes, "Disabled daily diagnostics do not enter the queue")
+        await telemetry?.flush()
+        XCTAssertEqual(http.requests.count, 2)
+        telemetry = nil
+        XCTAssertNil(weakTelemetry)
+        XCTAssertNil(tick.withLock { $0 })
+        XCTAssertEqual(cancellations.withLock { $0 }, 1)
     }
 
     func testPublicRegisteredCancellationIsCountedAfterWorkerFinalizesBeforeHandlerAccounting() async throws {

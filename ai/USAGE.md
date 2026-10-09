@@ -53,7 +53,26 @@ only; old epochs retain identity/build across restart. Failed reset pauses this
 instance's admission, not sound backlog or later valid reconstruction. An already
 winning receipt still cleans up after cancellation.
 
+The recommended bundle initializer creates a local startup heartbeat and schedules
+one every 86,400 seconds while the instance/process runs. It never uploads without
+`flush()`. `telemetry.heartbeat` is SDK-owned: caller attempts to emit it are
+rejected. Its only fields are `app`, `build`, `version`, `pending_batches`,
+`dropped_events`, `last_successful_upload` and `transport`. Metadata comes from
+caller allowlists; counts come from the queue and real terminal receipts. No text,
+credential, identity or underlying error is included.
+
+`diagnostics.lastHeartbeat` remains local when disabled; disabled heartbeats are
+not queued/sent. `droppedEventCount` sums durable queue counters across epochs;
+other counters and the last-success timestamp are instance-local. Heartbeats use
+the same quota and can themselves be dropped. Pending count is sampled before
+admitting the heartbeat; `-1` means failed read (no enqueue). Timestamp `0` means
+no confirmed upload in this instance. Transport is `disabled`, `uploading`,
+`failed` (last flush/integrity failure), or `enabled`; none proves remote readback.
+Missing configuration stays disabled even after `isEnabled=true`.
+
 `acceptedEventCount` counts privacy/admission-approved attempts, not current queue
 length: the explicit capacity policy can immediately drop an oversized safe event
-or later evict an accepted batch. Such loss is separately counted by the
-store-cumulative `droppedEventCount`; operation counters are instance-local.
+or later evict an accepted batch. Such loss is separately counted. If heartbeat
+sampling discovers a genuine store read/integrity failure, the instance fails
+closed, closes its active generation and preserves the originating diagnostic;
+it does not repair storage or silently overwrite dirty payloads.

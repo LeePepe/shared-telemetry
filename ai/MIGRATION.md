@@ -20,7 +20,10 @@ The public Blob candidate reuses this same quota across all identity/build epoch
 reset cannot multiply the 50 MiB default. Do not give an older unbounded Blob
 candidate a capacity-aware store containing loss tombstones. Finish pending paired
 eviction cleanup with the current reader before any separately reviewed rollback.
-No actual SAS, product pin, release version or legacy-store migration is selected here.
+Bundle configuration and heartbeat are additive: adopt the standard host initializer
+with explicit allowlisted app/build/version and consent. Missing plist settings
+produce local disabled observability, not a fallback receiver. No actual SAS,
+product pin, release version or legacy-store migration is selected here.
 
 1. Record the old source SHA/resolution, consumer adapter, enabled/consent
    semantics, labels and persistence locations without copying private content.

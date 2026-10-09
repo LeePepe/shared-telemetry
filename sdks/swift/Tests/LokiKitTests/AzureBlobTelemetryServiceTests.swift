@@ -86,22 +86,89 @@ final class AzureBlobTelemetryServiceTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(restored.diagnostics.droppedEventCount, 1)
     }
 
-    func testInvalidCapacityFailBeforeIdentityOrStorage() throws {
+    func testStartupHeartbeatUsesOnlyStandardFieldsAndRealCapacityCounter() async throws {
+        let telemetry = try AzureBlobTelemetryService(
+            containerURL: receiver.endpoint, sasQuery: "sr=c&sp=c&sig=synthetic-only",
+            app: "synthetic", build: "one",
+            privacy: AzureBlobPrivacyPolicy(events: ["synthetic.metric": ["count": .finiteNumber]],
+                apps: ["synthetic"], builds: ["one"], versions: ["1.2.3"]),
+            storeDirectory: directory, isEnabled: true, identityProvider: { Self.identityA },
+            configuration: receiver.configuration, heartbeatVersion: "1.2.3")
+        let heartbeat = try XCTUnwrap(telemetry.diagnostics.lastHeartbeat)
+        XCTAssertEqual(heartbeat.name, "telemetry.heartbeat")
+        XCTAssertEqual(heartbeat.properties, ["app": "synthetic", "build": "one", "version": "1.2.3",
+            "pending_batches": "0", "dropped_events": "0", "last_successful_upload": "0", "transport": "enabled"])
+        XCTAssertTrue(receiver.requests.isEmpty, "Startup admits locally; it does not upload without flush")
+        telemetry.track(name: "telemetry.heartbeat", properties: ["text": "synthetic-private-CANARY"])
+        XCTAssertEqual(telemetry.diagnostics.rejectedEventCount, 1, "Callers cannot forge the reserved SDK event")
+        await telemetry.flush()
+        XCTAssertEqual(try receiver.requests.flatMap { try decodedEvents($0.body).map(\.name) }, ["telemetry.heartbeat"])
+        XCTAssertNotNil(telemetry.diagnostics.lastSuccessfulUpload)
+    }
+
+    func testUnapprovedHeartbeatVersionAndInvalidCapacityFailBeforeIdentityOrStorage() throws {
         let calls = Mutex(0)
-        for capacity in [0, -1] {
+        for (version, capacity) in [("synthetic-private-CANARY", 4096), ("1.2.3", 0), ("1.2.3", -1)] {
             XCTAssertThrowsError(try AzureBlobTelemetryService(
                 containerURL: receiver.endpoint, sasQuery: "sr=c&sp=c&sig=synthetic-only",
                 app: "synthetic", build: "one",
-                privacy: AzureBlobPrivacyPolicy(apps: ["synthetic"], builds: ["one"]),
+                privacy: AzureBlobPrivacyPolicy(apps: ["synthetic"], builds: ["one"], versions: ["1.2.3"]),
                 storeDirectory: directory, isEnabled: true,
                 identityProvider: { calls.withLock { $0 += 1 }; return Self.identityA },
-                configuration: receiver.configuration, maxDiskBytes: capacity)) {
+                configuration: receiver.configuration, maxDiskBytes: capacity, heartbeatVersion: version)) {
                 XCTAssertEqual($0 as? AzureBlobTelemetryError, .invalidConfiguration)
             }
         }
         XCTAssertEqual(calls.withLock { $0 }, 0)
         XCTAssertTrue(try persistedFiles().isEmpty)
         XCTAssertTrue(receiver.requests.isEmpty)
+    }
+
+    func testBundleBuildSettingConfigurationProducesHeartbeatWithoutEnvironment() async throws {
+        let bundle = try syntheticBundle(["LokiKitBlobEndpoint": receiver.endpoint.absoluteString,
+            "LokiKitBlobSAS": "sr=c&sp=c&sig=synthetic-only"])
+        let telemetry = try AzureBlobTelemetryService(bundle: bundle, app: "synthetic", build: "one", version: "1.2.3",
+            privacy: AzureBlobPrivacyPolicy(apps: ["synthetic"], builds: ["one"], versions: ["1.2.3"]),
+            storeDirectory: directory.appendingPathComponent("store"), isEnabled: true, identityProvider: { Self.identityA },
+            configuration: receiver.configuration)
+        await telemetry.flush()
+        XCTAssertEqual(receiver.requests.count, 1)
+        let event = try XCTUnwrap(try decodedEvents(XCTUnwrap(receiver.requests.first).body).first)
+        XCTAssertEqual(event.name, "telemetry.heartbeat")
+        XCTAssertEqual(event.properties["transport"], "enabled")
+        XCTAssertFalse(String(decoding: try XCTUnwrap(receiver.requests.first).body, as: UTF8.self).contains("synthetic-only"))
+    }
+
+    func testMissingOrUnexpandedBundleSettingsStayLocallyObservableAndNeverProvisionStore() async throws {
+        for settings in [[:], ["LokiKitBlobEndpoint": "$(BLOB_ENDPOINT)", "LokiKitBlobSAS": "$(BLOB_SAS)"]] {
+            let bundle = try syntheticBundle(settings)
+            let root = directory.appendingPathComponent(UUID().uuidString)
+            let telemetry = try AzureBlobTelemetryService(bundle: bundle, app: "synthetic", build: "one", version: "1.2.3",
+                privacy: AzureBlobPrivacyPolicy(apps: ["synthetic"], builds: ["one"], versions: ["1.2.3"]),
+                storeDirectory: root, isEnabled: true, identityProvider: { throw PublicBlobFixtureError.providerCalledOnRestore },
+                configuration: receiver.configuration)
+            XCTAssertFalse(telemetry.isEnabled)
+            XCTAssertEqual(telemetry.diagnostics.lastError, .invalidConfiguration)
+            XCTAssertEqual(telemetry.diagnostics.lastHeartbeat?.properties["transport"], "disabled")
+            telemetry.isEnabled = true
+            telemetry.track(name: "synthetic.metric", properties: ["count": "1"])
+            await telemetry.flush()
+            telemetry.resetIdentifier()
+            XCTAssertFalse(telemetry.isEnabled)
+            XCTAssertEqual(telemetry.diagnostics.disabledEventCount, 1)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+            XCTAssertTrue(receiver.requests.isEmpty)
+        }
+    }
+
+    private func syntheticBundle(_ values: [String: String]) throws -> Bundle {
+        let root = directory.appendingPathComponent("\(UUID()).bundle")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var info = values
+        info["CFBundleIdentifier"] = "invalid.example.synthetic.\(UUID().uuidString)"
+        let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        try data.write(to: root.appendingPathComponent("Info.plist"))
+        return try XCTUnwrap(Bundle(url: root))
     }
 
     func testUnsafeWholeEventNeverEntersAcceptedStorageOrWire() async throws {
