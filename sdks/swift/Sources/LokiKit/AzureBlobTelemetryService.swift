@@ -1,7 +1,7 @@
 import Foundation
 import Synchronization
 
-/// Explicit-consent Blob telemetry with direct configuration.
+/// Explicit-consent Blob telemetry, with direct configuration or host-bundle configuration.
 public final class AzureBlobTelemetryService: TelemetryService, @unchecked Sendable {
     private struct Generation {
         let id: UInt64
@@ -28,41 +28,78 @@ public final class AzureBlobTelemetryService: TelemetryService, @unchecked Senda
         var nextGeneration: UInt64 = 0
         var cancellations = 0
         var lastError: AzureBlobTelemetryError?
+        var lastHeartbeat: TelemetryEvent?
+        var lastSuccessfulUpload: Date?
+        var lastFlushFailed = false
     }
     private let state: Mutex<State>
-    private let store: AzureBlobEventStore
+    private let store: AzureBlobEventStore?
     private let privacy: AzureBlobPrivacyPolicy
     private let identityProvider: @Sendable () throws -> UUID
-    private let containerURL: URL
-    private let sasQuery: String
+    private let containerURL: URL?
+    private let sasQuery: String?
     private let app: String
     private let build: String
     private let protocolClasses: [AnyClass]?
     private let synchronization: BlobRequestSynchronization?
+    private let heartbeatVersion: String?
+    private let heartbeatClock: BlobHeartbeatClock
+    private var cancelHeartbeat: (@Sendable () -> Void)?
 
     public convenience init(containerURL: URL, sasQuery: String, app: String, build: String,
                 privacy: AzureBlobPrivacyPolicy, storeDirectory: URL, isEnabled: Bool,
                 identityProvider: @escaping @Sendable () throws -> UUID,
-                configuration: URLSessionConfiguration = .ephemeral, maxDiskBytes: Int = 50 * 1024 * 1024) throws {
+                configuration: URLSessionConfiguration = .ephemeral, maxDiskBytes: Int = 50 * 1024 * 1024,
+                heartbeatVersion: String? = nil) throws {
         try self.init(containerURL: containerURL, sasQuery: sasQuery, app: app, build: build,
             privacy: privacy, storeDirectory: storeDirectory, isEnabled: isEnabled,
             identityProvider: identityProvider, configuration: configuration, synchronization: nil,
-            maxDiskBytes: maxDiskBytes)
+            maxDiskBytes: maxDiskBytes, heartbeatVersion: heartbeatVersion)
     }
 
-    internal init(containerURL: URL, sasQuery: String, app: String, build: String,
+    /// Build settings reach the SDK through expanded host Info.plist strings.
+    /// Missing settings are observable and disabled; they never select a fallback destination.
+    public convenience init(bundle: Bundle = .main, app: String, build: String, version: String,
+                privacy: AzureBlobPrivacyPolicy, storeDirectory: URL, isEnabled: Bool,
+                identityProvider: @escaping @Sendable () throws -> UUID,
+                configuration: URLSessionConfiguration = .ephemeral, maxDiskBytes: Int = 50 * 1024 * 1024) throws {
+        func setting(_ key: String) -> String? {
+            guard let value = bundle.object(forInfoDictionaryKey: key) as? String,
+                  !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !value.contains("$(") else { return nil }
+            return value
+        }
+        let endpoint: URL?
+        let sas: String?
+        if let endpointString = setting("LokiKitBlobEndpoint"), let query = setting("LokiKitBlobSAS") {
+            guard let url = URL(string: endpointString) else { throw AzureBlobTelemetryError.invalidConfiguration }
+            endpoint = url
+            sas = query
+        } else { endpoint = nil; sas = nil }
+        try self.init(containerURL: endpoint, sasQuery: sas, app: app, build: build, privacy: privacy,
+            storeDirectory: storeDirectory, isEnabled: isEnabled, identityProvider: identityProvider,
+            configuration: configuration, synchronization: nil, maxDiskBytes: maxDiskBytes, heartbeatVersion: version)
+    }
+
+    internal init(containerURL: URL?, sasQuery: String?, app: String, build: String,
                   privacy: AzureBlobPrivacyPolicy, storeDirectory: URL, isEnabled: Bool,
                   identityProvider: @escaping @Sendable () throws -> UUID,
                   configuration: URLSessionConfiguration, synchronization: BlobRequestSynchronization?,
-                  atomicWriteFault: AzureBlobEventStore.AtomicWriteFault? = nil, maxDiskBytes: Int = 50 * 1024 * 1024) throws {
+                  atomicWriteFault: AzureBlobEventStore.AtomicWriteFault? = nil, maxDiskBytes: Int = 50 * 1024 * 1024,
+                  heartbeatVersion: String? = nil, heartbeatClock: BlobHeartbeatClock = .live) throws {
         guard maxDiskBytes > 0 else { throw AzureBlobTelemetryError.invalidConfiguration }
+        let privacy = try heartbeatVersion.map { try privacy.includingHeartbeat(version: $0) } ?? privacy
         do {
             try privacy.validateMetadata(app: app, build: build)
-            _ = try AzureBlobTransport(containerURL: containerURL, sasQuery: sasQuery, app: app, build: build,
-                installID: UUID(), privacy: privacy, configuration: configuration)
+            if let containerURL, let sasQuery {
+                _ = try AzureBlobTransport(containerURL: containerURL, sasQuery: sasQuery, app: app, build: build,
+                    installID: UUID(), privacy: privacy, configuration: configuration)
+            } else if containerURL != nil || sasQuery != nil { throw AzureBlobTelemetryError.invalidConfiguration }
         } catch { throw AzureBlobTelemetryError.invalidConfiguration }
-        store = try AzureBlobEventStore(root: storeDirectory, containerURL: containerURL, app: app,
-            build: build, identityProvider: identityProvider, atomicWriteFault: atomicWriteFault, maxDiskBytes: maxDiskBytes)
+        if let containerURL {
+            store = try AzureBlobEventStore(root: storeDirectory, containerURL: containerURL, app: app,
+                build: build, identityProvider: identityProvider, atomicWriteFault: atomicWriteFault, maxDiskBytes: maxDiskBytes)
+        } else { store = nil }
         self.privacy = privacy
         self.identityProvider = identityProvider
         self.containerURL = containerURL
@@ -71,7 +108,65 @@ public final class AzureBlobTelemetryService: TelemetryService, @unchecked Senda
         self.build = build
         protocolClasses = configuration.protocolClasses
         self.synchronization = synchronization
-        state = Mutex(State(enabled: isEnabled))
+        self.heartbeatVersion = heartbeatVersion
+        self.heartbeatClock = heartbeatClock
+        state = Mutex(State(enabled: isEnabled && store != nil, lastError: store == nil ? .invalidConfiguration : nil))
+        if store == nil { NSLog("LokiKit: Blob transport disabled; configuration is missing.") }
+        if heartbeatVersion != nil {
+            recordHeartbeat()
+            cancelHeartbeat = heartbeatClock.scheduleDaily { [weak self] in self?.recordHeartbeat() }
+        }
+    }
+
+    deinit { cancelHeartbeat?() }
+
+    private func recordHeartbeat() {
+        guard let version = heartbeatVersion else { return }
+        let now = heartbeatClock.now() // Caller/time seams never execute under a state lock.
+        guard now.timeIntervalSince1970.isFinite else { return }
+        let effects = state.withLock { value -> (Task<Void, Never>, BlobRequestControl.Cancellation)? in
+            let pending: Int
+            do {
+                if store?.isValid == false {
+                    pending = -1 // Preserve the originating permanent failure, not a later generic refusal.
+                } else {
+                    try store?.validate()
+                    pending = try store?.pendingBatchCount() ?? 0
+                }
+            } catch {
+                pending = -1
+                store?.invalidateAfterReadFailure()
+                value.lastError = Self.publicError(error)
+            }
+            let transport = !value.enabled ? "disabled" :
+                (store?.isValid != true || value.lastFlushFailed ? "failed" : (value.active == nil ? "enabled" : "uploading"))
+            let event = TelemetryEvent(name: "telemetry.heartbeat", properties: [
+                "app": app, "build": build, "version": version, "pending_batches": String(pending),
+                "dropped_events": String(store?.droppedEventCount ?? 0),
+                "last_successful_upload": value.lastSuccessfulUpload.map { String($0.timeIntervalSince1970) } ?? "0",
+                "transport": transport
+            ], timestamp: now)
+            value.lastHeartbeat = event // Local observability remains available without consent.
+            if store?.isValid == false, let active = value.active {
+                return Self.invalidate(active, state: &value, error: value.lastError ?? .invalidStore)
+            }
+            guard value.enabled, value.ready, let store, store.isValid, pending >= 0 else { return nil }
+            do { try privacy.validate([event]) }
+            catch {
+                let mapped = Self.publicError(error)
+                value.lastError = mapped
+                if !store.isValid, let active = value.active { return Self.invalidate(active, state: &value, error: mapped) }
+                return nil
+            }
+            let queue = store.currentQueue()
+            let before = queue.persistenceFailureCount
+            queue.enqueue(event)
+            value.accepted += 1
+            if queue.persistenceFailureCount != before { value.lastError = .persistenceFailure }
+            return nil
+        }
+        effects?.1.perform()
+        effects?.0.cancel()
     }
 
     public var isEnabled: Bool {
@@ -81,9 +176,9 @@ public final class AzureBlobTelemetryService: TelemetryService, @unchecked Senda
                 // Worker validation may already have made the store permanently
                 // invalid. Disable must preserve that cause even if it closes the
                 // control before the worker reaches its outer error handling.
-                let cause: AzureBlobTelemetryError = store.isValid == true ? .cancelled : (value.lastError ?? .invalidStore)
+                let cause: AzureBlobTelemetryError = store?.isValid == true ? .cancelled : (value.lastError ?? .invalidStore)
                 let effects = !newValue ? value.active.map { Self.invalidate($0, state: &value, error: cause) } : nil
-                value.enabled = newValue
+                value.enabled = newValue && store != nil
                 return effects
             }
             effects?.1.perform()
@@ -92,19 +187,22 @@ public final class AzureBlobTelemetryService: TelemetryService, @unchecked Senda
     }
 
     public var diagnostics: AzureBlobTelemetryDiagnostics {
-        state.withLock { AzureBlobTelemetryDiagnostics(droppedEventCount: store.droppedEventCount, acceptedEventCount: $0.accepted,
+        state.withLock { AzureBlobTelemetryDiagnostics(droppedEventCount: store?.droppedEventCount ?? 0, acceptedEventCount: $0.accepted,
             rejectedEventCount: $0.rejected, disabledEventCount: $0.disabled,
             identityBlockedEventCount: $0.identityBlocked, identityFailureCount: $0.identityFailures,
-            persistenceFailureCount: store.persistenceFailureCount, transportFailureCount: $0.transportFailures,
-            cancellationCount: $0.cancellations, isAdmissionReady: $0.ready && store.isValid == true,
-            isFlushActive: $0.active != nil, lastError: $0.lastError) }
+            persistenceFailureCount: store?.persistenceFailureCount ?? 0, transportFailureCount: $0.transportFailures,
+            cancellationCount: $0.cancellations, isAdmissionReady: $0.ready && store?.isValid == true,
+            isFlushActive: $0.active != nil, lastError: $0.lastError,
+            lastHeartbeat: $0.lastHeartbeat, lastSuccessfulUpload: $0.lastSuccessfulUpload) }
     }
 
     public func track(_ event: TelemetryEvent) {
         let effects = state.withLock { value -> (Task<Void, Never>, BlobRequestControl.Cancellation)? in
             guard value.enabled else { value.disabled += 1; return nil }
+            guard let store else { value.disabled += 1; return nil }
             guard value.ready && store.isValid else { value.identityBlocked += 1; return nil }
             do {
+                guard event.name != "telemetry.heartbeat" else { throw AzureBlobError.privacyRejected }
                 try privacy.validate([event])
             }
             catch { value.rejected += 1; value.lastError = .privacyRejected; return nil }
@@ -139,7 +237,7 @@ public final class AzureBlobTelemetryService: TelemetryService, @unchecked Senda
         let registration = FlushRegistration()
         await withTaskCancellationHandler {
             let generation = state.withLock { value -> Generation? in
-                guard !Task.isCancelled, value.enabled, value.active == nil, store.isValid else { return nil }
+                guard !Task.isCancelled, value.enabled, value.active == nil, let store, store.isValid else { return nil }
                 value.nextGeneration += 1
                 let id = value.nextGeneration
                 let entries = store.entries
@@ -157,6 +255,7 @@ public final class AzureBlobTelemetryService: TelemetryService, @unchecked Senda
 
     private func runFlush(id: UInt64, control: BlobRequestControl,
                           entries: [(AzureBlobEventStore.Epoch, TelemetryQueue)]) async {
+        guard let store, let containerURL, let sasQuery else { return }
         // Worker cannot pass the state mutex before its generation has been registered.
         guard state.withLock({ $0.active?.id == id }) else { return }
         defer {
@@ -175,11 +274,16 @@ public final class AzureBlobTelemetryService: TelemetryService, @unchecked Senda
                 configuration.protocolClasses = protocolClasses
                 let transport = try AzureBlobTransport(containerURL: containerURL, sasQuery: sasQuery,
                     app: app, build: epoch.build, installID: epoch.installID, privacy: privacy, configuration: configuration)
-                try await transport.flush(queue, control: control)
+                try await transport.flush(queue, control: control, deliveryObserved: {
+                    let now = self.heartbeatClock.now()
+                    guard now.timeIntervalSince1970.isFinite else { return }
+                    self.state.withLock { $0.lastSuccessfulUpload = now; $0.lastFlushFailed = false }
+                })
             } catch {
                 await synchronization?.beforeWorkerErrorHandling?() // Detecting lock has already been released.
                 let effects = state.withLock { value -> (Task<Void, Never>, BlobRequestControl.Cancellation)? in
                     let mapped = Self.publicError(error)
+                    if mapped != .cancelled { value.lastFlushFailed = true }
                     // The detecting operation records the store failure under this
                     // mutex. Incidental worker cancellation/network errors cannot hide it.
                     if store.isValid { value.lastError = mapped }
@@ -212,7 +316,7 @@ public final class AzureBlobTelemetryService: TelemetryService, @unchecked Senda
         let task = state.withLock { value -> Task<Void, Never>? in
             if registration.registered && cancellation.first { value.cancellations += 1 }
             guard let active = value.active, active.control === control else { return nil }
-            if cancellation.first && store.isValid == true { value.lastError = .cancelled }
+            if cancellation.first && store?.isValid == true { value.lastError = .cancelled }
             return active.task
         }
         cancellation.perform()
@@ -220,6 +324,7 @@ public final class AzureBlobTelemetryService: TelemetryService, @unchecked Senda
     }
 
     public func resetIdentifier() {
+        guard let store else { return }
         let reserved = state.withLock { value -> Bool in
             guard !value.resetting else {
                 value.identityFailures += 1; value.lastError = .resetInProgress; return false
@@ -288,6 +393,26 @@ public struct AzureBlobTelemetryDiagnostics: Sendable {
     public let isAdmissionReady: Bool
     public let isFlushActive: Bool
     public let lastError: AzureBlobTelemetryError?
+    public let lastHeartbeat: TelemetryEvent?
+    public let lastSuccessfulUpload: Date?
+}
+
+/// Time is the only replaceable heartbeat seam. Scheduling cannot supply an event or receipt.
+internal struct BlobHeartbeatClock: Sendable {
+    let now: @Sendable () -> Date
+    let scheduleDaily: @Sendable (@escaping @Sendable () -> Void) -> (@Sendable () -> Void)
+
+    static let live = BlobHeartbeatClock(now: { Date() }, scheduleDaily: { tick in
+        let task = Task.detached {
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(86_400)) }
+                catch { return }
+                guard !Task.isCancelled else { return }
+                tick()
+            }
+        }
+        return { task.cancel() }
+    })
 }
 
 /// Fixed, content-free outcomes. HTTP status is the only external associated detail.

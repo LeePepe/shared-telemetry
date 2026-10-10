@@ -37,13 +37,46 @@ not Loki's default queue or another Adapter's directory. One instance/task lifet
 holds the store lease. Policy fields/labels, app/build and UUID provenance belong
 to trusted caller code/configuration, never incoming user content.
 
-Direct construction is timer-free.
+Direct construction without `heartbeatVersion` retains the timer-free interface.
 Caller schedules `flush`; `track` and
 catalog changes synchronously perform local I/O. Provide identity on initial
 creation/reset; valid reconstruction restores the catalog identity without calling
 the provider. Disable before disconnecting, await the active flush's exit, and
 retain pending files. An already-won terminal receipt may complete cleanup. Do not
 erase the store, rotate old pending identities or treat reset as data deletion.
+### Info.plist and build settings
+
+The standard host path is
+`AzureBlobTelemetryService(bundle:app:build:version:privacy:storeDirectory:isEnabled:identityProvider:configuration:maxDiskBytes:)`.
+It reads `LokiKitBlobEndpoint` and `LokiKitBlobSAS` from the supplied host Bundle
+(default `.main`). Set their Info.plist values to `$(TELEMETRY_BLOB_ENDPOINT)`
+and `$(TELEMETRY_BLOB_SAS)` respectively; Xcode must expand these at build time.
+Defining a build setting alone does not create a plist entry. The SDK does not
+read process environment, Keychain or private configuration. Never commit actual
+endpoint/SAS values or put them in telemetry. A plist ships with the App, not
+secret storage: credential provisioning/rotation and product adoption still need
+their own review.
+
+App/build/version are explicit trusted metadata, not inferred identity. Include
+the version in `AzureBlobPrivacyPolicy(… versions: ["1.2.3"])`; app/build must also
+be allowlisted. Present but invalid endpoint/SAS or unapproved metadata throws
+content-free `invalidConfiguration`. If either key is missing, empty or still
+an unexpanded build reference, construction succeeds **disabled**, logs exactly
+one fixed local NSLog warning per instance (including Release), and exposes
+`lastHeartbeat.properties["transport"] == "disabled"`. It does not call the identity
+provider, create/open a store, enqueue or send. Enabling cannot repair missing
+configuration: reconstruct with valid configuration and fresh explicit consent.
+No secret value is logged.
+
+The bundle initializer records startup heartbeat and owns the daily timer.
+Direct configuration can opt into the same behavior with `heartbeatVersion`.
+Startup is synchronous local admission only; uploads still require explicit
+`flush()`. The daily interval is 86,400 elapsed seconds, not a midnight wakeup
+or background execution entitlement. Suspended/terminated Apps cannot emit on
+schedule; missed periods are not backfilled. Release the instance after awaiting
+owned flushes to cancel its weakly captured timer. Disabled consent updates only
+the local heartbeat, never storage or network.
+
 `maxDiskBytes` defaults to 50 MiB for the **whole Blob store**, not each reset.
 Queue counters, oldest-batch eviction, oversize rejection and paired cleanup
 apply across ordered epochs. The budget covers JSON plus Blob sidecars, not

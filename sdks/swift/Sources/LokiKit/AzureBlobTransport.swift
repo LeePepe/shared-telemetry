@@ -34,7 +34,8 @@ struct AzureBlobTransport: Sendable {
     }
 
     func flush(_ queue: TelemetryQueue, control: BlobRequestControl? = nil,
-               responseBytesObserved: (@Sendable (Int) -> Void)? = nil) async throws {
+               responseBytesObserved: (@Sendable (Int) -> Void)? = nil,
+               deliveryObserved: (@Sendable () -> Void)? = nil) async throws {
         guard queue.beginFlush() else { return }
         defer { queue.endFlush() }
         let configuration = URLSessionConfiguration.ephemeral
@@ -96,6 +97,7 @@ struct AzureBlobTransport: Sendable {
                 }
                 throw AzureBlobError.httpFailure(reply.status)
             }
+            deliveryObserved?() // Real terminal receipt, outside request/queue locks; never a decision.
             try queue.removeBatch(id: batch.id)
             // Source deletion only follows delivery. A crash/cleanup failure here
             // can leave an inert sidecar; old/new queue readers ignore that suffix.

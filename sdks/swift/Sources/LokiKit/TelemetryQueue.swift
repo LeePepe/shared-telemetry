@@ -129,6 +129,13 @@ final class TelemetryQueue: Sendable {
     var persistenceFailureCount: Int { state.withLock { $0.persistenceFailures } }
     var droppedEventCount: Int { state.withLock { Self.addDrops($0.capacity?.droppedEvents ?? 0, $0.unrecordedDrops) } }
 
+    func pendingBatchCount() throws -> Int {
+        try withState { value in
+            let stored = try readBatches(state: &value)
+            return Set(stored.map(\.id)).union(value.pending.map(\.id)).count
+        }
+    }
+
     // Transport-owned durable receipt files participate in the same operation counter.
     func recordPersistenceFailure() { state.withLock { $0.persistenceFailures += 1 } }
 

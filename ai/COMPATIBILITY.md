@@ -46,5 +46,9 @@ events after exit. No power-loss, global FIFO, exact-once or unlimited-retention
 guarantee. Synthetic tests do not establish real TLS/Azure or product acceptance.
 
 The same quota and durable drops span all Blob epochs; resetting identity does not
-multiply capacity. Direct configuration is explicit and timer-free.
-No product activation or release-version change is implied.
+multiply capacity. The direct initializer remains timer-free unless
+`heartbeatVersion` is supplied. The additive bundle initializer owns startup/daily
+heartbeats and reads expanded Info.plist values; missing configuration is locally
+observable and disabled, in Debug and Release. Versions must be explicitly
+allowlisted. No environment-only fallback, background wakeup guarantee, product
+activation or release-version change is implied.
