@@ -26,6 +26,49 @@ class ContractTests(unittest.TestCase):
     def test_valid(self):
         check(self.root)
 
+    def test_public_inventory_has_exact_fifteen_entries(self):
+        registry = json.loads((self.root / "ai/registry.json").read_text())
+        self.assertEqual(len(registry["capabilities"]), 15)
+        check(self.root)
+
+    def test_fourteen_and_sixteen_entries_are_rejected(self):
+        file = self.root / "ai/registry.json"
+        original = json.loads(file.read_text())
+        for count in (14, 16):
+            with self.subTest(count=count):
+                registry = json.loads(json.dumps(original))
+                if count == 14:
+                    registry["capabilities"].pop()
+                else:
+                    registry["capabilities"].append(registry["capabilities"][0])
+                file.write_text(json.dumps(registry))
+                with self.assertRaisesRegex(ValueError, "SWIFT_AI_SCHEMA: item count"):
+                    check(self.root)
+
+    def test_same_count_duplicate_is_rejected(self):
+        file = self.root / "ai/registry.json"
+        registry = json.loads(file.read_text())
+        registry["capabilities"][-1] = registry["capabilities"][0]
+        file.write_text(json.dumps(registry))
+        with self.assertRaisesRegex(ValueError, "SWIFT_AI_API"):
+            check(self.root)
+
+    def test_omitted_type_replaced_by_unregistered_type_is_rejected(self):
+        file = self.root / "ai/registry.json"
+        registry = json.loads(file.read_text())
+        registry["capabilities"][-1]["symbol"] = "SyntheticUnregisteredType"
+        file.write_text(json.dumps(registry))
+        with self.assertRaisesRegex(ValueError, "SWIFT_AI_API"):
+            check(self.root)
+
+    def test_wrong_existing_source_mapping_is_rejected(self):
+        file = self.root / "ai/registry.json"
+        registry = json.loads(file.read_text())
+        registry["capabilities"][0]["source"] = "../sdks/swift/Sources/LokiKit/TelemetryService.swift"
+        file.write_text(json.dumps(registry))
+        with self.assertRaisesRegex(ValueError, "SWIFT_AI_API"):
+            check(self.root)
+
     def test_missing_document(self):
         (self.root / "ai/INTEGRATION.md").unlink()
         with self.assertRaisesRegex(ValueError, "SWIFT_AI_DOCUMENT"):

@@ -20,7 +20,8 @@ atomic persistence and a storage-failure counter; the existing public methods,
 initializer and legacy JSON batch format remain compatible. Synchronous file
 I/O latency and write amplification are caller-visible costs; internal batch
 rotation bounds rewrite growth without discarding events or changing the disk
-format. Unbounded event queue, legacy product-specific
+format. The later configurable disk quota bounds source JSON and sidecars,
+not memory fallback or metadata. Legacy product-specific
 event names, real receiver authentication/storage readback, four-metric coverage,
 dependency/security scans and full D1 remain open or unmeasured. There is no
 whole-SDK redaction claim and no complete 6DQ pass.
@@ -28,3 +29,22 @@ whole-SDK redaction claim and no complete 6DQ pass.
 0.1.0 is the first release, so no earlier deprecation period exists. Future
 breaking changes need explicit from/to guidance and reviewed consumer pin
 upgrades.
+
+## Unreleased Blob addition
+
+The new explicit Adapter adds five public inventory entries (including the policy's
+nested ValueRule), for exactly15; no existing public type/default or dependency
+range changes. Its private version1 catalog wraps unchanged event-array JSON and
+immutable Blob sidecars in identity/build epoch directories. It rejects legacy
+nonempty roots instead of importing/migrating them. Default TelemetryQueue/Loki
+read behavior stays unchanged; strict failure propagation is opt-in for this Blob
+path only. Event admission and catalog writes are synchronous and can block.
+
+Catalog-only epochs and live failed-write originals are retryable; real structural/
+read errors block. No inventory can detect arbitrary external deletion of unindexed
+events after exit. No power-loss, global FIFO, exact-once or unlimited-retention
+guarantee. Synthetic tests do not establish real TLS/Azure or product acceptance.
+
+The same quota and durable drops span all Blob epochs; resetting identity does not
+multiply capacity. Direct configuration is explicit and timer-free.
+No product activation or release-version change is implied.

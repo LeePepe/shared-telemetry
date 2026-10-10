@@ -25,4 +25,9 @@
 /sdks/swift/Sources/LokiKit/AzureBlobTransport.swift  @LeePepe
 /sdks/swift/Sources/LokiKit/AzureBlobBatch.swift  @LeePepe
 /sdks/swift/Sources/LokiKit/AzureBlobPrivacyPolicy.swift  @LeePepe
+/sdks/swift/Sources/LokiKit/AzureBlobTelemetryService.swift  @LeePepe
+/sdks/swift/Sources/LokiKit/AzureBlobEventStore.swift  @LeePepe
+/sdks/swift/Sources/LokiKit/TelemetryQueue.swift  @LeePepe
+/ai/registry.json                 @LeePepe
+/ai/registry.schema.json          @LeePepe
 /stack/.env.example               @LeePepe
