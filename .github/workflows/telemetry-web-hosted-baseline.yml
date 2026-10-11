@@ -1,0 +1,71 @@
+# UNPUBLISHED SOURCE CANDIDATE. This file grants no activation permission.
+# Root must independently review/freeze all four blobs and authorize publication.
+# The push commit supplies only hash-checked helpers, never the candidate SDK.
+# Candidate SDK, lock, OCI index/child and platform are independently frozen in
+# the supervisor. Changing helper bytes requires a new reviewed workflow pin.
+name: Telemetry Web hosted baseline (bounded development branch)
+
+on:
+  push:
+    branches:
+      - diag/web-hosted-baseline-20260924
+
+permissions: {}
+
+concurrency:
+  group: telemetry-web-hosted-baseline-20260924
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    if: >-
+      github.repository == 'LeePepe/shared-telemetry' &&
+      github.repository_id == '1213460359' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/diag/web-hosted-baseline-20260924' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Verify reviewed helpers, admit boundary, record the unchanged baseline
+        shell: bash --noprofile --norc -euo pipefail {0}
+        env:
+          REVIEWED_HELPER_COMMIT: ${{ github.sha }}
+        run: |
+          # No checkout, third-party action, cache, credential, package install,
+          # PR/default-branch mutation, publish action, or fallback route.
+          [[ "$REVIEWED_HELPER_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          bootstrap_started="$(/usr/bin/date +%s)"
+          bootstrap="$(/usr/bin/mktemp -d /tmp/telemetry-web-bootstrap.XXXXXXXX)"
+          cleanup_bootstrap() {
+            case "$bootstrap" in
+              /tmp/telemetry-web-bootstrap.*) ;;
+              *) return 2 ;;
+            esac
+            [[ -d "$bootstrap" && ! -L "$bootstrap" ]]
+            for name in telemetry-web-hosted-baseline.py telemetry-web-hosted-d1.cjs telemetry-web-hosted-reporter.mjs; do
+              if [[ -f "$bootstrap/$name" && ! -L "$bootstrap/$name" ]]; then
+                /usr/bin/unlink "$bootstrap/$name"
+              fi
+            done
+            /usr/bin/rmdir "$bootstrap"
+          }
+          trap cleanup_bootstrap EXIT
+          for name in telemetry-web-hosted-baseline.py telemetry-web-hosted-d1.cjs telemetry-web-hosted-reporter.mjs; do
+            /usr/bin/env -i PATH=/usr/bin:/bin /usr/bin/curl --disable \
+              --fail --silent --show-error --proto '=https' --tlsv1.2 \
+              --connect-timeout 5 --max-time 10 --retry 0 --max-filesize 262144 \
+              --output "$bootstrap/$name" \
+              "https://raw.githubusercontent.com/LeePepe/shared-telemetry/$REVIEWED_HELPER_COMMIT/scripts/$name"
+          done
+          printf '%s  %s\n' \
+            e6a64dfdc6bfc7182ad1598b17947039aeac8fed08813379342d16ed571c6549 "$bootstrap/telemetry-web-hosted-baseline.py" \
+            f81f9283e36a585ed90d47797133b8ffb6318bfb71d2dc4397129de14a8a8144 "$bootstrap/telemetry-web-hosted-d1.cjs" \
+            fc6a77c572b589a82ed49ad2a8c82931788632015d3a9a2b7693d15a2edf830f "$bootstrap/telemetry-web-hosted-reporter.mjs" \
+            | /usr/bin/sha256sum --strict --check -
+          # Establish privilege before opening namespace handles. sudo is never
+          # asked to preserve an FD; all SDK execution stays nonroot in Docker.
+          # env -i drops runner credentials/proxies/configuration from the harness.
+          /usr/bin/sudo -n /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 \
+            /usr/bin/python3 -I "$bootstrap/telemetry-web-hosted-baseline.py" \
+            --run --bootstrap-started "$bootstrap_started"
