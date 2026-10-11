@@ -1,0 +1,175 @@
+- generic [active] [ref=f2e1]:
+  - generic [ref=f2e221]:
+    - log
+    - log
+  - banner "App Store Connect" [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - heading [level=1] [ref=f2e6]:
+        - link "App Store Connect" [ref=f2e7] [cursor=pointer]:
+          - /url: /
+      - navigation "Global" [ref=f2e8]:
+        - list [ref=f2e10]:
+          - listitem [ref=f2e11]:
+            - link "Apps" [ref=f2e12] [cursor=pointer]:
+              - /url: /apps
+          - listitem [ref=f2e13]:
+            - link "Trends" [ref=f2e14] [cursor=pointer]:
+              - /url: /trends
+          - listitem [ref=f2e15]:
+            - link "Reports" [ref=f2e16] [cursor=pointer]:
+              - /url: /itc/payments_and_financial_reports
+          - listitem [ref=f2e17]:
+            - link "Business" [ref=f2e18] [cursor=pointer]:
+              - /url: /business
+          - listitem [ref=f2e19]:
+            - link "Users and Access" [ref=f2e20] [cursor=pointer]:
+              - /url: /access/users
+      - button "天培 李 Tianpei Li|407090589|1 Account name menu" [ref=f2e22] [cursor=pointer]:
+        - generic:
+          - generic: 天培 李
+          - generic: Tianpei Li|407090589|1
+  - generic [ref=f2e194]:
+    - button "Apps menu, VoxPocket, selected" [ref=f2e199] [cursor=pointer]:
+      - generic [ref=f2e200]:
+        - generic "VoxPocket" [ref=f2e201]:
+          - img "VoxPocket" [ref=f2e202]
+        - generic [ref=f2e204]: VoxPocket
+    - navigation "Apps" [ref=f2e209]:
+      - list [ref=f2e210]:
+        - listitem [ref=f2e211]:
+          - link "Distribution" [ref=f2e212] [cursor=pointer]:
+            - /url: /apps/6792489427/distribution
+        - listitem [ref=f2e213]:
+          - link "Analytics" [ref=f2e214] [cursor=pointer]:
+            - /url: /apps/6792489427/analytics
+        - listitem [ref=f2e215]:
+          - link "TestFlight" [ref=f2e216] [cursor=pointer]:
+            - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6792489427/testflight
+        - listitem [ref=f2e217]:
+          - link "Xcode Cloud" [ref=f2e218] [cursor=pointer]:
+            - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6792489427/ci
+  - main [ref=f2e223]:
+    - generic [ref=f2e227]:
+      - navigation "TestFlight" [ref=f2e229]:
+        - list [ref=f2e230]:
+          - listitem [ref=f2e231]:
+            - heading "Builds" [level=2] [ref=f2e233]
+            - list [ref=f2e234]:
+              - listitem [ref=f2e235]:
+                - link "iOS" [ref=f2e236] [cursor=pointer]:
+                  - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6792489427/testflight/ios
+          - listitem [aria-hidden] [ref=f2e238]:
+            - separator [ref=f2e239]
+          - listitem [ref=f2e240]:
+            - heading "Feedback" [level=2] [ref=f2e242]
+            - list [ref=f2e243]:
+              - listitem [ref=f2e244]:
+                - link "Crashes" [ref=f2e245] [cursor=pointer]:
+                  - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6792489427/testflight/crashes
+              - listitem [ref=f2e247]:
+                - link "Screenshots" [ref=f2e248] [cursor=pointer]:
+                  - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6792489427/testflight/screenshots
+          - listitem [aria-hidden] [ref=f2e250]:
+            - separator [ref=f2e251]
+          - listitem [ref=f2e252]:
+            - heading "Testers" [level=2] [ref=f2e254]
+            - list [ref=f2e255]:
+              - listitem [ref=f2e256]:
+                - link "All" [ref=f2e257] [cursor=pointer]:
+                  - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6792489427/testflight/testers
+            - generic [ref=f2e259]:
+              - generic [ref=f2e260]:
+                - heading "Internal Testing" [level=3] [ref=f2e261]
+                - button "New Group" [ref=f2e262] [cursor=pointer]
+              - list [ref=f2e265]:
+                - listitem [ref=f2e266]:
+                  - generic [ref=f2e267]:
+                    - link "IN Internal" [ref=f2e268] [cursor=pointer]:
+                      - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6792489427/testflight/groups/12ca792d-6668-4e8c-a39c-adb4bf1f0339
+                      - generic [ref=f2e270]:
+                        - generic [ref=f2e271]: IN
+                        - generic [ref=f2e273]: Internal
+                    - button "Delete" [ref=f2e274] [cursor=pointer]
+            - generic [ref=f2e281]:
+              - generic [ref=f2e282]:
+                - heading "External Testing" [level=3] [ref=f2e283]
+                - button "New Group" [ref=f2e284] [cursor=pointer]
+              - list
+          - listitem [aria-hidden] [ref=f2e287]:
+            - separator [ref=f2e288]
+          - listitem [ref=f2e289]:
+            - heading "Additional" [level=2] [ref=f2e291]
+            - list [ref=f2e292]:
+              - listitem [ref=f2e293]:
+                - link "Test Information" [ref=f2e294] [cursor=pointer]:
+                  - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6792489427/testflight/test-info
+              - listitem [ref=f2e298]:
+                - generic [ref=f2e302] [cursor=pointer]:
+                  - generic [ref=f2e303]: About TestFlight Data
+                  - button [aria-hidden] [ref=f2e304]: "?"
+      - generic [ref=f2e307]:
+        - generic [ref=f2e308]:
+          - generic [ref=f2e310]:
+            - generic "Internal" [ref=f2e311]:
+              - generic [aria-hidden] [ref=f2e312]: IN
+            - generic [ref=f2e314]:
+              - heading "Internal" [level=2] [ref=f2e316]
+              - paragraph [ref=f2e317]: Internal Group ∙ 1 Tester ∙ 1 Build
+          - navigation [ref=f2e319]:
+            - listitem [ref=f2e320] [cursor=pointer]:
+              - generic [ref=f2e321]: Testers
+            - listitem [ref=f2e322] [cursor=pointer]:
+              - generic [ref=f2e323]: Builds
+            - listitem [ref=f2e324] [cursor=pointer]:
+              - generic [ref=f2e325]: Settings
+        - generic [ref=f2e408]:
+          - paragraph [ref=f2e411]: 1 tester has been added to this group.
+          - button [ref=f2e412] [cursor=pointer]
+        - generic [ref=f2e490]:
+          - heading "Build (1)" [level=3] [ref=f2e494]
+          - grid "Builds" [ref=f2e500]:
+            - rowgroup [ref=f2e501]:
+              - row [ref=f2e502]:
+                - columnheader [ref=f2e503]:
+                  - button "Build" [ref=f2e504] [cursor=pointer]
+                - columnheader "Status" [ref=f2e510]
+                - columnheader "Platform" [ref=f2e515]
+                - columnheader "Sessions" [ref=f2e519]
+                - columnheader "Crashes" [ref=f2e523]
+            - rowgroup [ref=f2e527]:
+              - row [ref=f2e528]:
+                - rowheader [ref=f2e529]:
+                  - link "Build 1.0 (38)" [ref=f2e532] [cursor=pointer]:
+                    - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6792489427/testflight/ios/b3212b83-1212-49ae-930b-588ed700f971
+                    - generic [ref=f2e538]:
+                      - generic [ref=f2e539]: Build
+                      - text: 1.0 (38)
+                - gridcell "Ready to Test Expires in 90 days" [ref=f2e540]:
+                  - generic [ref=f2e542]:
+                    - generic [ref=f2e543]: Ready to Test
+                    - generic [ref=f2e546]: Expires in 90 days
+                - gridcell [ref=f2e547]:
+                  - paragraph [ref=f2e549]: iOS
+                - gridcell [ref=f2e550]:
+                  - paragraph [ref=f2e554]: –
+                - gridcell [ref=f2e555]:
+                  - paragraph [ref=f2e559]: –
+  - contentinfo [ref=f2e34]:
+    - generic [ref=f2e35]:
+      - list [ref=f2e36]:
+        - listitem [ref=f2e341]:
+          - link "App Store Connect" [ref=f2e342] [cursor=pointer]:
+            - /url: /apps
+      - list [ref=f2e38]:
+        - listitem [ref=f2e39]: Copyright © 2026 Apple Inc. All rights reserved. |
+        - listitem [ref=f2e40]:
+          - link "Terms of Service" [ref=f2e41] [cursor=pointer]:
+            - /url: /WebObjects/iTunesConnect.woa/wa/termsOfService
+          - text: "|"
+        - listitem [ref=f2e42]:
+          - link "Privacy Policy" [ref=f2e43] [cursor=pointer]:
+            - /url: https://www.apple.com/legal/privacy
+          - text: "|"
+        - listitem [ref=f2e44]:
+          - link "Contact Us" [ref=f2e45] [cursor=pointer]:
+            - /url: /contact-us

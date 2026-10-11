@@ -1,0 +1,31 @@
+[     262ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ http://localhost:3010/login:0
+[     352ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "username"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:3010/login:0
+[   42230ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ http://localhost:3010/login:0
+[   42259ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "username"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:3010/login:0
+[   42558ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ http://localhost:3010/d/voxpocket-logs:0
+[   42559ms] [LOG] not correct url correcting /d/voxpocket-logs/voxpocket-logs /d/voxpocket-logs @ http://localhost:3010/public/build/3729.ffff83737929c19134ef.js:528
+[   70848ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ http://localhost:3010/d/voxpocket-logs/voxpocket-logs:0
+[ 3253148ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q914_1:0
+[ 3253149ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/annotations?from=1789032425255&to=1789034225255&limit=100&matchAny=false&dashboardUID=voxpocket-logs:0
+[ 3253151ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q915_1:0
+[ 3874633ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/annotations?from=1789033046738&to=1789034846738&limit=100&matchAny=false&dashboardUID=voxpocket-logs:0
+[ 3874633ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q950_1:0
+[ 3874633ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q951_1:0
+[ 6153450ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q1010_1:0
+[ 6153451ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q1011_1:0
+[ 7229803ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/annotations?from=1789036401901&to=1789038201901&limit=100&matchAny=false&dashboardUID=voxpocket-logs:0
+[ 7229803ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q1023_1:0
+[ 8270089ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q1031_1:0
+[ 8270142ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q1030_1:0
+[ 8270191ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q1031_1:0
+[ 8270229ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q1030_1:0
+[ 8275073ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q1033_1:0
+[ 8275107ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q1032_1:0
+[ 8275286ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/user/auth-tokens/rotate:0
+[ 8278464ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ http://localhost:3010/d/voxpocket-logs/voxpocket-logs?orgId=1&refresh=5s:0
+[ 8891405ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/annotations?from=1789038063510&to=1789039863510&limit=100&matchAny=false&dashboardUID=voxpocket-logs:0
+[ 8891405ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q172_1:0
+[ 8891406ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q173_1:0
+[10077046ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/annotations?from=1789039249152&to=1789041049152&limit=100&matchAny=false&dashboardUID=voxpocket-logs:0
+[10077048ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q221_1:0
+[10077048ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:3010/api/ds/query?ds_type=loki&requestId=Q220_1:0

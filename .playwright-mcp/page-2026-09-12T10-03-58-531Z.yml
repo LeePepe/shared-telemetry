@@ -1,0 +1,191 @@
+- generic [ref=e1]:
+  - generic [ref=e204]:
+    - log
+    - log
+  - banner "App Store Connect" [ref=e3]:
+    - generic [ref=e4]:
+      - heading [level=1] [ref=e6]:
+        - link "App Store Connect" [ref=e7] [cursor=pointer]:
+          - /url: /
+      - navigation "Global" [ref=e8]:
+        - list [ref=e29]:
+          - listitem [ref=e30]:
+            - link "Apps" [ref=e31] [cursor=pointer]:
+              - /url: /apps
+          - listitem [ref=e32]:
+            - link "Trends" [ref=e33] [cursor=pointer]:
+              - /url: /trends
+          - listitem [ref=e34]:
+            - link "Reports" [ref=e35] [cursor=pointer]:
+              - /url: /itc/payments_and_financial_reports
+          - listitem [ref=e36]:
+            - link "Business" [ref=e37] [cursor=pointer]:
+              - /url: /business
+          - listitem [ref=e38]:
+            - link "Users and Access" [ref=e39] [cursor=pointer]:
+              - /url: /access/users
+      - button "天培 李 Tianpei Li|407090589|1 Account name menu" [ref=e10] [cursor=pointer]:
+        - generic:
+          - generic: 天培 李
+          - generic: Tianpei Li|407090589|1
+  - generic [ref=e43]:
+    - button "Apps menu, VitalStride, selected" [ref=e48] [cursor=pointer]:
+      - generic [ref=e49]:
+        - generic "VitalStride" [ref=e50]:
+          - img "VitalStride" [ref=e51]
+        - generic [ref=e53]: VitalStride
+    - navigation "Apps" [ref=e58]:
+      - list [ref=e59]:
+        - listitem [ref=e60]:
+          - link "Distribution" [ref=e61] [cursor=pointer]:
+            - /url: /apps/6791061778/distribution
+        - listitem [ref=e62]:
+          - link "Analytics" [ref=e63] [cursor=pointer]:
+            - /url: /apps/6791061778/analytics
+        - listitem [ref=e64]:
+          - link "TestFlight" [ref=e65] [cursor=pointer]:
+            - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6791061778/testflight
+        - listitem [ref=e66]:
+          - link "Xcode Cloud" [ref=e67] [cursor=pointer]:
+            - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6791061778/ci
+  - main [ref=e73]:
+    - generic [ref=e77]:
+      - navigation "TestFlight" [ref=e79]:
+        - list [ref=e80]:
+          - listitem [ref=e81]:
+            - heading "Builds" [level=2] [ref=e83]
+            - list [ref=e84]:
+              - listitem [ref=e85]:
+                - link "iOS" [ref=e86] [cursor=pointer]:
+                  - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6791061778/testflight/ios
+          - listitem [aria-hidden] [ref=e88]:
+            - separator [ref=e89]
+          - listitem [ref=e90]:
+            - heading "Feedback" [level=2] [ref=e92]
+            - list [ref=e93]:
+              - listitem [ref=e94]:
+                - link "Crashes" [ref=e95] [cursor=pointer]:
+                  - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6791061778/testflight/crashes
+              - listitem [ref=e97]:
+                - link "Screenshots" [ref=e98] [cursor=pointer]:
+                  - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6791061778/testflight/screenshots
+          - listitem [aria-hidden] [ref=e100]:
+            - separator [ref=e101]
+          - listitem [ref=e102]:
+            - heading "Testers" [level=2] [ref=e104]
+            - list [ref=e105]:
+              - listitem [ref=e106]:
+                - link "All" [ref=e107] [cursor=pointer]:
+                  - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6791061778/testflight/testers
+            - generic [ref=e109]:
+              - generic [ref=e110]:
+                - heading "Internal Testing" [level=3] [ref=e111]
+                - button "New Group" [ref=e112] [cursor=pointer]
+              - list [ref=e115]:
+                - listitem [ref=e116]:
+                  - generic [ref=e117]:
+                    - link "IN Internal" [active] [ref=e118] [cursor=pointer]:
+                      - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6791061778/testflight/groups/d0d79940-0a0c-4438-a898-d884261a0dfb
+                      - generic [ref=e120]:
+                        - generic [ref=e121]: IN
+                        - generic [ref=e123]: Internal
+                    - button "Delete" [ref=e124] [cursor=pointer]
+            - generic [ref=e131]:
+              - generic [ref=e132]:
+                - heading "External Testing" [level=3] [ref=e133]
+                - button "New Group" [ref=e134] [cursor=pointer]
+              - list
+          - listitem [aria-hidden] [ref=e137]:
+            - separator [ref=e138]
+          - listitem [ref=e139]:
+            - heading "Additional" [level=2] [ref=e141]
+            - list [ref=e142]:
+              - listitem [ref=e143]:
+                - link "Test Information" [ref=e144] [cursor=pointer]:
+                  - /url: /teams/d0f02ac9-4512-45cd-9aa6-21e9c3cbd7db/apps/6791061778/testflight/test-info
+              - listitem [ref=e148]:
+                - generic [ref=e152] [cursor=pointer]:
+                  - generic [ref=e153]: About TestFlight Data
+                  - button [aria-hidden] [ref=e154]: "?"
+      - generic [ref=e932]:
+        - generic [ref=e933]:
+          - generic [ref=e935]:
+            - generic "Internal" [ref=e936]:
+              - generic [aria-hidden] [ref=e937]: IN
+            - generic [ref=e939]:
+              - heading "Internal" [level=2] [ref=e941]
+              - paragraph [ref=e942]: Internal Group ∙ 1 Tester ∙ 30 Builds
+          - navigation [ref=e944]:
+            - listitem [ref=e945] [cursor=pointer]:
+              - generic [ref=e946]: Testers
+            - listitem [ref=e947] [cursor=pointer]:
+              - generic [ref=e948]: Builds
+            - listitem [ref=e949] [cursor=pointer]:
+              - generic [ref=e950]: Settings
+        - generic [ref=e953]:
+          - generic [ref=e957]:
+            - heading "Tester (1)" [level=3] [ref=e958]
+            - button "Add Testers" [ref=e959] [cursor=pointer]
+          - generic [ref=e963]:
+            - button "Add Filter" [ref=e967] [cursor=pointer]
+            - button "Export Testers Data" [ref=e970] [cursor=pointer]
+          - grid "ITC.apps.testers.headers.testers" [ref=e978]:
+            - rowgroup [ref=e979]:
+              - row [ref=e980]:
+                - columnheader [ref=e981]:
+                  - checkbox "Select All" [ref=e982]
+                - columnheader [ref=e983]:
+                  - button "Tester" [ref=e984] [cursor=pointer]
+                - columnheader [ref=e987]:
+                  - button "Status" [ref=e988] [cursor=pointer]
+                - columnheader [ref=e994]:
+                  - button "Sessions" [ref=e995] [cursor=pointer]
+                - columnheader [ref=e998]:
+                  - button "Crashes" [ref=e999] [cursor=pointer]
+                - columnheader [ref=e1002]:
+                  - button "Feedback" [ref=e1003] [cursor=pointer]
+                - columnheader "Devices" [ref=e1006]
+            - rowgroup [ref=e1010]:
+              - row [ref=e1011]:
+                - gridcell [ref=e1012]:
+                  - checkbox "Select 1105208297@qq.com 天培 李 ⸱ Internal" [ref=e1013]
+                - rowheader "1105208297@qq.com 天培 李 ⸱ Internal" [ref=e1014]:
+                  - generic [ref=e1016]:
+                    - link "1105208297@qq.com" [ref=e1017] [cursor=pointer]:
+                      - /url: mailto:1105208297@qq.com
+                    - generic [ref=e1018]: 天培 李 ⸱ Internal
+                - gridcell [ref=e1019]:
+                  - generic [ref=e1021]:
+                    - paragraph [ref=e1022]:
+                      - generic [ref=e1023]: Installed 1.1 (31)
+                    - paragraph [ref=e1026]: Sep 11, 2026
+                - gridcell [ref=e1027]:
+                  - paragraph [ref=e1029]: "112"
+                - gridcell [ref=e1030]:
+                  - paragraph [ref=e1032]: "1"
+                - gridcell [ref=e1033]:
+                  - paragraph [ref=e1035]: "6"
+                - gridcell "MacBook Pro (16-inch, M5 Pro) +2 macOS 26.6.2" [ref=e1036]:
+                  - generic [ref=e1038]:
+                    - paragraph [ref=e1039]:
+                      - button "MacBook Pro (16-inch, M5 Pro) +2" [ref=e1040] [cursor=pointer]
+                    - generic [ref=e1041]: macOS 26.6.2
+  - contentinfo [ref=e15]:
+    - generic [ref=e16]:
+      - list [ref=e17]:
+        - listitem [ref=e202]:
+          - link "App Store Connect" [ref=e203] [cursor=pointer]:
+            - /url: /apps
+      - list [ref=e20]:
+        - listitem [ref=e21]: Copyright © 2026 Apple Inc. All rights reserved. |
+        - listitem [ref=e22]:
+          - link "Terms of Service" [ref=e23] [cursor=pointer]:
+            - /url: /WebObjects/iTunesConnect.woa/wa/termsOfService
+          - text: "|"
+        - listitem [ref=e24]:
+          - link "Privacy Policy" [ref=e25] [cursor=pointer]:
+            - /url: https://www.apple.com/legal/privacy
+          - text: "|"
+        - listitem [ref=e26]:
+          - link "Contact Us" [ref=e27] [cursor=pointer]:
+            - /url: /contact-us

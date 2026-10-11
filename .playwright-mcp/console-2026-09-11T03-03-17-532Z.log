@@ -1,0 +1,44 @@
+[    6904ms] [LOG] MSAL.js token provider init: no in-flight redirect promise @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.5EwSJ8.min.js:0
+[    6905ms] [LOG] MSAL.js token provider init: loginRedirect @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.5EwSJ8.min.js:0
+[    6905ms] [LOG] calling loginRedirect @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.5EwSJ8.min.js:0
+[   10200ms] [LOG] MSAL.js token provider initialization completed via handleRedirectPromise @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.5EwSJ8.min.js:0
+[   11356ms] [WARNING] Contribution ms.vss-code-web.pr-detail-data-provider has been called 13 times in the last 1789095807745 seconds @ https://cdn.vsassets.io/ext/ms.vss-web/platform-content/ms.vss-web.platform-content.es6.1OBlME.min.js:0
+[   11838ms] [INFO] SignalR: moved from disconnected to connecting for /msasg/_apis/24a0501b-d131-45af-ae52-27db9291efd4 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8
+[   12735ms] [INFO] SignalR: moved from connecting to connected for /msasg/_apis/24a0501b-d131-45af-ae52-27db9291efd4 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8
+[   12735ms] [INFO] SignalR: connected! @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8
+[  598020ms] Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'discussionStore')
+    at initialize (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:8149)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:16659)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:60725)
+    at <anonymous> (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:59065)
+[  598234ms] Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'discussionStore')
+    at initialize (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:8149)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:16659)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:60725)
+    at <anonymous> (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:59065)
+[  598260ms] Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'discussionStore')
+    at initialize (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:8149)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:16659)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:60725)
+    at <anonymous> (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:59065)
+[  598424ms] Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'discussionStore')
+    at initialize (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:8149)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:16659)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:60725)
+    at <anonymous> (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:59065)
+[  598427ms] Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'discussionStore')
+    at initialize (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:8149)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:16659)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:60725)
+    at <anonymous> (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:59065)
+[  598650ms] Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'discussionStore')
+    at initialize (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:8149)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/discussion-diff-integration-content/ms.vss-code-web.discussion-diff-integration-content.es6.dF5e23.min.js:0:16659)
+    at initializeLineMapping (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:60725)
+    at <anonymous> (https://cdn.vsassets.io/ext/ms.vss-code-web/changes/ms.vss-code-web.changes.es6.1dImmq.min.js:0:59065)
+[  625625ms] [INFO] SignalR: reconnecting to /msasg/_apis/24a0501b-d131-45af-ae52-27db9291efd4 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8
+[  626174ms] [INFO] SignalR: reconnected to /msasg/_apis/24a0501b-d131-45af-ae52-27db9291efd4 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8
+[ 1235231ms] [INFO] SignalR: slow connection from /msasg/_apis/24a0501b-d131-45af-ae52-27db9291efd4 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8
+[ 1238538ms] [INFO] SignalR: reconnecting to /msasg/_apis/24a0501b-d131-45af-ae52-27db9291efd4 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8
+[ 1239079ms] [INFO] SignalR: reconnected to /msasg/_apis/24a0501b-d131-45af-ae52-27db9291efd4 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8
+[ 1500911ms] [INFO] SignalR: disconnected from /msasg/_apis/24a0501b-d131-45af-ae52-27db9291efd4 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8

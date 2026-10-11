@@ -1,0 +1,58 @@
+[    9965ms] [LOG] MSAL.js token provider init: no in-flight redirect promise @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.wy_rif.min.js:0
+[    9965ms] [LOG] MSAL.js token provider init: loginRedirect @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.wy_rif.min.js:0
+[    9965ms] [LOG] calling loginRedirect @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.wy_rif.min.js:0
+[   14845ms] [LOG] MSAL.js token provider initialization completed via handleRedirectPromise @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.wy_rif.min.js:0
+[   16382ms] [INFO] SignalR: moved from disconnected to connecting for /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[   17240ms] [INFO] SignalR: moved from connecting to connected for /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[   17240ms] [INFO] SignalR: connected! @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[   34409ms] [INFO] SignalR: stopping... @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[   34410ms] [INFO] SignalR: disconnected from /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[   34975ms] [INFO] SignalR: moved from disconnected to connecting for /_signalr/_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[   36093ms] [INFO] SignalR: moved from connecting to connected for /_signalr/_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[   36093ms] [INFO] SignalR: connected! @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[   38480ms] [INFO] BSSO Telemetry: {"result":"Error","error":"NoExtension","type":"ChromeSsoTelemetry","data":{},"traces":["BrowserSSO Initialized","Creating ChromeBrowserCore provider","Sending message for method CreateProviderAsync","Received message for method CreateProviderAsync","Error: ChromeBrowserCore error NoExtension: Extension is not installed."]} @ https://aadcdn.msauth.net/shared/1.0/content/js/BssoInterrupt_Core_8k_MLTH5HA-ha6OAu4vroQ2.js:17
+[ 1059749ms] [INFO] SignalR: stopping... @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1059750ms] [INFO] SignalR: disconnected from /_signalr/_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1059821ms] [WARNING] Unhandled promise rejection: hub is not initialized @ https://cdn.vsassets.io/ext/ms.vss-web/platform-content/ms.vss-web.platform-content.es6.jYYCy0.min.js:0
+[ 1059823ms] hub is not initialized
+[ 1061450ms] [INFO] SignalR: moved from disconnected to connecting for /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1062330ms] [INFO] SignalR: moved from connecting to connected for /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1062331ms] [INFO] SignalR: connected! @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1065233ms] [INFO] SignalR: stopping... @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1065233ms] [INFO] SignalR: disconnected from /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1065266ms] [INFO] SignalR: moved from disconnected to connecting for /_signalr/_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1066311ms] [INFO] SignalR: moved from connecting to connected for /_signalr/_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1066311ms] [INFO] SignalR: connected! @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1068777ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://office.vstmr.visualstudio.com/a4d3949e-967a-4298-8b6d-53f45f6b0704/_apis/testresults/pipelinedebugger/analysisresult/build/54829203:0
+[ 1071515ms] [INFO] SignalR: stopping... @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1071515ms] [INFO] SignalR: disconnected from /_signalr/_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1071565ms] [WARNING] Unhandled promise rejection: hub is not initialized @ https://cdn.vsassets.io/ext/ms.vss-web/platform-content/ms.vss-web.platform-content.es6.jYYCy0.min.js:0
+[ 1071565ms] hub is not initialized
+[ 1072928ms] [INFO] SignalR: moved from disconnected to connecting for /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1073820ms] [INFO] SignalR: moved from connecting to connected for /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1073821ms] [INFO] SignalR: connected! @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1081468ms] [INFO] SignalR: stopping... @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1081468ms] [INFO] SignalR: disconnected from /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1081489ms] [INFO] SignalR: moved from disconnected to connecting for /_signalr/_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1081648ms] [ERROR] Error: Data provider data "ms.vss-code-web.versioncontrol-viewmodel-data-provider" not present.
+    at l.getViewModel (https://cdn.vsassets.io/ext/ms.vss-code-web/repos-common/ms.vss-code-web.repos-common.es6.Kzy8XI.min.js:1:10230)
+    at l.getRepository (https://cdn.vsassets.io/ext/ms.vss-code-web/repos-common/ms.vss-code-web.repos-common.es6.Kzy8XI.min.js:1:9437)
+    at i._serviceStart (https://cdn.vsassets.io/ext/ms.vss-code-web/repos-common/ms.vss-code-web.repos-common.es6.Kzy8XI.min.js:1:14595)
+    at Object._loadService (https://cdn.vsassets.io/ext/ms.vss-web/platform-content/ms.vss-web.platform-content.es6.jYYCy0.min.js:1:11200)
+    at Object.getService (https://cdn.vsassets.io/ext/ms.vss-web/platform-content/ms.vss-web.platform-content.es6.jYYCy0.min.js:1:10484)
+    at t.<computed>.getReposRoutingService (https://cdn.vsassets.io/ext/ms.vss-code-web/repos-common/ms.vss-code-web.repos-common.es6.Kzy8XI.min.js:1:13910)
+    at u.updateCompletionData (https://cdn.vsassets.io/ext/ms.vss-code-web/pr-details-content/ms.vss-code-web.pr-details-content.es6.cgRMg0.min.js:1:144099)
+    at updateAutoCompleteData (https://cdn.vsassets.io/ext/ms.vss-code-web/pr-details-content/ms.vss-code-web.pr-details-content.es6.cgRMg0.min.js:1:108085)
+    at r (https://cdn.vsassets.io/ext/ms.vss-web/core-content/ms.vss-web.core-content.es6.9bQ5_t.min.js:1:175525)
+    at a.notify (https://cdn.vsassets.io/ext/ms.vss-web/core-content/ms.vss-web.core-content.es6.9bQ5_t.min.js:1:175872) @ https://cdn.vsassets.io/ext/ms.vss-code-web/repos-common/ms.vss-code-web.repos-common.es6.Kzy8XI.min.js:0
+[ 1082161ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://office.vstmr.visualstudio.com/a4d3949e-967a-4298-8b6d-53f45f6b0704/_apis/testresults/pipelinedebugger/analysisresult/build/54829196:0
+[ 1082624ms] [INFO] SignalR: moved from connecting to connected for /_signalr/_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1082624ms] [INFO] SignalR: connected! @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1089919ms] [INFO] SignalR: stopping... @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1089920ms] [INFO] SignalR: disconnected from /_signalr/_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1089966ms] [WARNING] Unhandled promise rejection: hub is not initialized @ https://cdn.vsassets.io/ext/ms.vss-web/platform-content/ms.vss-web.platform-content.es6.jYYCy0.min.js:0
+[ 1089966ms] hub is not initialized
+[ 1091313ms] [INFO] SignalR: moved from disconnected to connecting for /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1092190ms] [INFO] SignalR: moved from connecting to connected for /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 1092190ms] [INFO] SignalR: connected! @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8
+[ 2226007ms] [INFO] SignalR: disconnected from /_apis/a4d3949e-967a-4298-8b6d-53f45f6b0704 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.R_yDMH.min.js:8

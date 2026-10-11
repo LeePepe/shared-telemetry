@@ -1,0 +1,20 @@
+[    3663ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://flightcompanion.microsoft.com/api/script:0
+[    3664ms] [WARNING] [Flight Expert loader] Download failed; using cached script if available Error: HTTP 401 fetching https://flightcompanion.microsoft.com/api/script
+    at download (http://localhost:9770/flight-expert-loader.js:46:31)
+    at async latestBundle (http://localhost:9770/flight-expert-loader.js:118:20)
+    at async start (http://localhost:9770/flight-expert-loader.js:173:16) @ http://localhost:9770/flight-expert-loader.js:174
+[   34016ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://flightcompanion.microsoft.com/api/script:0
+[   34016ms] [WARNING] [Flight Expert loader] Background download failed Error: HTTP 401 fetching https://flightcompanion.microsoft.com/api/script
+    at download (http://localhost:9770/flight-expert-loader.js:46:31)
+    at async latestBundle (http://localhost:9770/flight-expert-loader.js:118:20)
+    at async http://localhost:9770/flight-expert-loader.js:130:9 @ http://localhost:9770/flight-expert-loader.js:132
+[   94377ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://flightcompanion.microsoft.com/api/script:0
+[   94377ms] [WARNING] [Flight Expert loader] Background download failed Error: HTTP 401 fetching https://flightcompanion.microsoft.com/api/script
+    at download (http://localhost:9770/flight-expert-loader.js:46:31)
+    at async latestBundle (http://localhost:9770/flight-expert-loader.js:118:20)
+    at async http://localhost:9770/flight-expert-loader.js:130:9 @ http://localhost:9770/flight-expert-loader.js:132
+[  218650ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://flightcompanion.microsoft.com/api/script:0
+[  218650ms] [WARNING] [Flight Expert loader] Background download failed Error: HTTP 401 fetching https://flightcompanion.microsoft.com/api/script
+    at download (http://localhost:9770/flight-expert-loader.js:46:31)
+    at async latestBundle (http://localhost:9770/flight-expert-loader.js:118:20)
+    at async http://localhost:9770/flight-expert-loader.js:130:9 @ http://localhost:9770/flight-expert-loader.js:132

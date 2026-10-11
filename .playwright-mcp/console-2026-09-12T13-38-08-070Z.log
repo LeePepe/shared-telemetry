@@ -1,0 +1,5 @@
+[    5844ms] [LOG] %c com.ugreen.desktop_77937(20980742)#1605 %c 26/05/25 09:46 %c release_20260526  padding: 2px 1px; border-radius: 3px 0 0 3px; color: #fff; background: #606060; font-weight: bold; padding: 2px 1px; color: #fff; background: #42c02e; font-weight: bold; padding: 2px 1px; border-radius: 0 3px 3px 0; color: #fff; background: #38F; font-weight: bold; @ http://192.168.31.17:9999/desktop/?os=ugospro:6
+[    7741ms] [LOG] 当前浏览器版本 @ http://192.168.31.17:9999/desktop/browser-compatible/browser-compatible.js?t=2:18
+[    7741ms] [LOG] chrome: 153.0.0.0 @ http://192.168.31.17:9999/desktop/browser-compatible/browser-compatible.js?t=2:22
+[   11804ms] [INFO] [deviceConnect] SET to:http://192.168.31.17:9999 @ http://192.168.31.17:9999/desktop/static/main-wg2740nk.js:5
+[   41862ms] [INFO] [deviceConnect] API clearToken by Account @ http://192.168.31.17:9999/desktop/static/main-wg2740nk.js:5

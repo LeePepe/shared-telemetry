@@ -1,0 +1,8 @@
+[    3971ms] [LOG] MSAL.js token provider init: no in-flight redirect promise @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.5EwSJ8.min.js:0
+[    3972ms] [LOG] MSAL.js token provider init: loginRedirect @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.5EwSJ8.min.js:0
+[    3972ms] [LOG] calling loginRedirect @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.5EwSJ8.min.js:0
+[    6882ms] [LOG] MSAL.js token provider initialization completed via handleRedirectPromise @ https://cdn.vsassets.io/ext/ms.vss-web/msal-content/ms.vss-web.msal-content.es6.5EwSJ8.min.js:0
+[    8353ms] [INFO] SignalR: moved from disconnected to connecting for /_apis/2579b442-0817-40f1-8ec8-19e6fb5794c6 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8
+[    9208ms] [INFO] SignalR: moved from connecting to connected for /_apis/2579b442-0817-40f1-8ec8-19e6fb5794c6 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8
+[    9208ms] [INFO] SignalR: connected! @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8
+[  416415ms] [INFO] SignalR: disconnected from /_apis/2579b442-0817-40f1-8ec8-19e6fb5794c6 @ https://cdn.vsassets.io/ext/ms.vss-features/signalr/ms.vss-features.signalr.es6.xnmVuC.min.js:8

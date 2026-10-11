@@ -1,0 +1,7 @@
+[       0ms] [ERROR] The Content Security Policy directive 'upgrade-insecure-requests' is ignored when delivered in a report-only policy. @ https://msft.ghe.com/enterprises/msft/sso?return_to=https%3A%2F%2Fmsft.ghe.com%2Fsan%2Fbing-growth-sapphire-app%2Fpull%2F39:0
+[     725ms] [ERROR] Manifest: Line: 7, column: 1, Syntax error. @ https://msft.ghe.com/manifest.json:6
+[    1807ms] [ERROR] The Content Security Policy directive 'upgrade-insecure-requests' is ignored when delivered in a report-only policy. @ https://msft.ghe.com/enterprises/msft/oidc/initiate?return_to=https%3A%2F%2Fmsft.ghe.com%2Fsan%2Fbing-growth-sapphire-app%2Fpull%2F39:0
+[    2526ms] [ERROR] Manifest: Line: 7, column: 1, Syntax error. @ https://msft.ghe.com/manifest.json:6
+[    6723ms] [ERROR] The Content Security Policy directive 'upgrade-insecure-requests' is ignored when delivered in a report-only policy. @ https://msft.ghe.com/auth/oidc/callback:0
+[    7429ms] [ERROR] Manifest: Line: 7, column: 1, Syntax error. @ https://msft.ghe.com/manifest.json:6
+[   11452ms] [ERROR] The Content Security Policy directive 'upgrade-insecure-requests' is ignored when delivered in a report-only policy. @ https://msft.ghe.com/san/bing-growth-sapphire-app/pull/39:0
