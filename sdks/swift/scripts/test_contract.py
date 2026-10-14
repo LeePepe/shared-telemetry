@@ -77,7 +77,7 @@ class ContractTests(unittest.TestCase):
     def test_wrong_version(self):
         file = self.root / "ai/registry.json"
         registry = json.loads(file.read_text())
-        registry["version"] = "0.2.0"
+        registry["version"] = "9.9.9"
         file.write_text(json.dumps(registry))
         with self.assertRaisesRegex(ValueError, "SWIFT_AI_SCHEMA"):
             check(self.root)

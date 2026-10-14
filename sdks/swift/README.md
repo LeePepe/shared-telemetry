@@ -19,7 +19,7 @@ These are manifest requirements, not tested combinations or an assertion of rele
 | [LokiTelemetryService](Sources/LokiKit/LokiTelemetryService.swift) | Loki event transport, synchronous enqueue persistence, configurable `maxDiskBytes`, read-only `persistenceFailureCount` and `droppedEventCount`; `resetIdentifier()` is a no-op |
 | [LokiLogSink](Sources/LokiKit/LokiLogSink.swift) | Separate, bounded, filtered log mirror; `record`, `start(flushInterval:)`, `flush() async` |
 | [TelemetryDeckService](Sources/LokiKit/TelemetryDeckService.swift) | Adapter to TelemetryDeck, not Loki |
-| [AzureBlobTelemetryService](Sources/LokiKit/AzureBlobTelemetryService.swift) | Candidate Blob admission/identity/lifecycle, allowlist, heartbeat and host-bundle configuration |
+| [AzureBlobTelemetryService](Sources/LokiKit/AzureBlobTelemetryService.swift) | Blob admission/identity/lifecycle, allowlist, heartbeat and host-bundle configuration |
 | [TelemetryService performance extensions](Sources/LokiKit/TelemetryService+Performance.swift) | Sync/async `measure`, `measureStart`, `measureEnd`; record `duration_ms` timing and append `.failed` to failure event names, without automatically extracting error descriptions |
 | [TelemetryEventName](Sources/LokiKit/VoxPocketTelemetryEventNames.swift) | Existing product-specific enum; its presence is an exception to the product-local semantics target, not a relocation already completed |
 
@@ -27,7 +27,7 @@ These are manifest requirements, not tested combinations or an assertion of rele
 
 ## Loki event telemetry
 
-`LokiTelemetryService(endpoint:appLabels:isEnabled:authToken:storeDirectory:maxDiskBytes:)` requires a `URL`; labels default to `[:]`, enabled to `true`, token and store directory to `nil`. The optional positive `maxDiskBytes` defaults to **50 MiB (52,428,800 bytes)**, independently of `LokiLogSink`; a host can override it in the initializer. Supply a consumer-owned isolated store directory when planning a drill; the default uses Application Support's `telemetry/pending` (temporary-directory fallback), not a per-endpoint namespace. These additions are unreleased source, not APIs in tag `v0.1.0`.
+`LokiTelemetryService(endpoint:appLabels:isEnabled:authToken:storeDirectory:maxDiskBytes:)` requires a `URL`; labels default to `[:]`, enabled to `true`, token and store directory to `nil`. The optional positive `maxDiskBytes` defaults to **50 MiB (52,428,800 bytes)**, independently of `LokiLogSink`; a host can override it in the initializer. Supply a consumer-owned isolated store directory when planning a drill; the default uses Application Support's `telemetry/pending` (temporary-directory fallback), not a per-endpoint namespace. These additions are released in tag `v0.2.0`, and were not in tag `v0.1.0`.
 
 Illustrative/source-reviewed, not executed: this construction and event call use synthetic values. The reserved domain is a placeholder, not a working receiver. Construction can create a directory; this is not a runnable validation recipe.
 
@@ -54,7 +54,7 @@ func attemptFlush(telemetry: LokiTelemetryService) async {
 }
 ```
 
-In the unreleased source, enabled `track` synchronously attempts an atomic JSON write before returning, subject to the capacity policy below. An immediately following `flush()` includes retained events in its snapshot; it is still not a delivery receipt. File I/O blocks the calling thread. Internal batches rotate after 64 events or before a combined batch would exceed the byte limit. Ordinary enqueue rewrites only its active batch; a cached file-size inventory and overflow-time ordering avoid decoding the entire backlog on every enqueue. Storage speed and event size still affect latency; no wall-clock bound is guaranteed. The caller owns flush scheduling.
+In this release, enabled `track` synchronously attempts an atomic JSON write before returning, subject to the capacity policy below. An immediately following `flush()` includes retained events in its snapshot; it is still not a delivery receipt. File I/O blocks the calling thread. Internal batches rotate after 64 events or before a combined batch would exceed the byte limit. Ordinary enqueue rewrites only its active batch; a cached file-size inventory and overflow-time ordering avoid decoding the entire backlog on every enqueue. Storage speed and event size still affect latency; no wall-clock bound is guaranteed. The caller owns flush scheduling.
 
 The cap covers the logical byte lengths of owned UUID-named source JSON files **plus Blob sidecars**, not filesystem allocation units, transient atomic-write copies, the small loss ledger or other files in the directory. A single event whose one-element legacy JSON array exceeds the cap is discarded before admission and counted once; existing backlog is not evicted to admit an impossible event. At the limit, data is accepted. On overflow, the queue evicts **whole oldest batches**, counting their events rather than files; it may free more bytes than strictly necessary. Recovered batches use the existing file-creation ordering (UUID breaks equal-date eviction ties), followed by current-instance batches in enqueue order. It does not rewrite a partially journaled Blob request into a smaller batch or assign it a new identity.
 
@@ -74,11 +74,11 @@ The event disk format remains UUID-named JSON arrays using the existing ISO-8601
 
 The shipper sets a ten-second request timeout and accepts HTTP 2xx. It groups streams by event name; lines contain the name when properties are empty, otherwise sorted `key=value` text. This is not the Web/Python JSON envelope.
 
-## Unreleased public Azure Blob Adapter
+## Public Azure Blob Adapter
 
 `AzureBlobTelemetryService` conforms to the existing `TelemetryService`. These
-additions are candidate source, **not included in released tag 0.1.0**; select a
-reviewed immutable revision and its matching documentation. Existing Loki and
+additions are released in tag `v0.2.0`, and were not included in released tag `v0.1.0`;
+select a reviewed immutable revision or tag and its matching documentation. Existing Loki and
 TelemetryDeck defaults, public methods and stores are unchanged. No product
 activation, real Azure/TLS acceptance or release is established by these examples.
 

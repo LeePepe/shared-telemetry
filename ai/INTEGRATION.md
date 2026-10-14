@@ -1,15 +1,15 @@
 # Swift integration
 
 Use the canonical repository URL and one root SwiftPM dependency:
-`.package(url: "https://github.com/LeePepe/shared-telemetry.git", exact: "0.1.0")`
-(tag `v0.1.0`). The [consumer fixture](EXAMPLES.md) shows a complete manifest;
+`.package(url: "https://github.com/LeePepe/shared-telemetry.git", exact: "0.2.0")`
+(tag `v0.2.0`). The [consumer fixture](EXAMPLES.md) shows a complete manifest;
 it pins a full revision.
 
 The public product/module remains `LokiKit`. Platforms are iOS 26 and macOS 26,
 Swift tools 6.2. Commit consumer `Package.resolved` according to its policy;
 record the resolved TelemetryDeck version/revision, not just the provider's
-`from: "2.0.0"` range. The dependency range is unchanged; candidate Blob additions
-below are not present in released 0.1.0.
+`from: "2.0.0"` range. The dependency range is unchanged; Blob additions
+below are released in 0.2.0.
 
 Start with `NoopTelemetryService` until the consumer's consent/configuration is
 approved. Inject endpoint, labels, credentials and isolated storage explicitly
@@ -28,9 +28,9 @@ consent, platform and controlled-receiver checks. For removal, cancel owned
 tasks and disconnect the mirror before reverting the pin. Do not erase queue
 files or backend data without an approved consumer disposition.
 
-## Candidate Blob integration
+## Blob integration
 
-Use only a reviewed immutable candidate containing `AzureBlobTelemetryService`.
+Use only a reviewed immutable release or revision containing `AzureBlobTelemetryService`.
 Supply `containerURL`, `sasQuery`, `app`, `build`, `privacy`, `storeDirectory`,
 `isEnabled` and `identityProvider` explicitly. Use a dedicated new Blob-only store,
 not Loki's default queue or another Adapter's directory. One instance/task lifetime

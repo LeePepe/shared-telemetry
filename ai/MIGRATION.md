@@ -5,7 +5,7 @@ Initial path: local `LokiKit` checkout → the same public module from a fixed
 does not. The original release baseline makes no runtime, platform or API change and
 does not modify any product's dependency.
 
-The later **unreleased queue-capacity change** adds a default 50 MiB disk-data
+The **queue-capacity change** adds a default 50 MiB disk-data
 cap with a positive `maxDiskBytes` constructor override and `droppedEventCount`.
 It preserves event JSON and Blob wire formats, but can discard oldest batches.
 The loss ledger and all retained files form one single-owner store. Before
@@ -16,9 +16,9 @@ or mix old/new writers. Already evicted events cannot be recovered by rollback.
 See the [queue contract](../sdks/swift/README.md#loki-event-telemetry) for accounting,
 in-flight deferral and failed-persistence limits.
 
-The public Blob candidate reuses this same quota across all identity/build epochs;
+The public Blob interface reuses this same quota across all identity/build epochs;
 reset cannot multiply the 50 MiB default. Do not give an older unbounded Blob
-candidate a capacity-aware store containing loss tombstones. Finish pending paired
+store containing loss tombstones to an older reader. Finish pending paired
 eviction cleanup with the current reader before any separately reviewed rollback.
 Bundle configuration and heartbeat are additive: adopt the standard host initializer
 with explicit allowlisted app/build/version and consent. Missing plist settings
@@ -45,14 +45,13 @@ does not prove any product's old→new→old rollback.
 For consumers of the legacy released interfaces only, a candidate SHA pin can
 be replaced with exact 0.1.0 (tag `v0.1.0`); confirm its resolved commit and rerun
 version-mode external/consumer checks. That release does not contain the Blob
-Interface. Blob candidate validation must use its reviewed immutable revision
-and matching documentation; adoption of a future applicable approved release
+Interface. For v0.2.0, use exact 0.2.0 (tag `v0.2.0`). Adoption of a future applicable approved release
 requires new resolution and external/consumer checks, not a switch to 0.1.0.
 Do not overwrite or delete an immutable release to repair consumers.
 
-## Candidate Blob opt-in and rollback
+## Blob opt-in and rollback
 
-The public Blob Interface is unreleased, not an API in tag0.1.0. Start with a new,
+The public Blob Interface is released in v0.2.0, not tag v0.1.0. Start with a new,
 explicitly consented Blob-only directory and reviewed field/label/identity rules.
 Do not copy legacy JSON into it or share its lease with another live owner. Existing
 Loki/TelemetryDeck paths remain independently configured and are not retroactively

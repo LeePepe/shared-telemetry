@@ -5,7 +5,7 @@
   "properties": {
     "$schema": {"const": "registry.schema.json"}, "schemaVersion": {"const": 1},
     "library": {"const": "shared-telemetry"}, "releaseUnit": {"const": "LokiKit-swift"},
-    "product": {"const": "LokiKit"}, "module": {"const": "LokiKit"}, "version": {"const": "0.1.0"},
+    "product": {"const": "LokiKit"}, "module": {"const": "LokiKit"}, "version": {"const": "0.2.0"},
     "releaseStatus": {"enum": ["unreleased", "released"]},
     "wireSchema": {"const": "loki-push-v1; inner line not versioned"},
     "documents": {"type": "object", "additionalProperties": false,

@@ -1,6 +1,8 @@
 # Swift release changes
 
-## Unreleased — public Azure Blob telemetry
+## 0.2.0 — second release (Git tag v0.2.0)
+
+### Public Azure Blob telemetry
 
 - Add explicit-consent `AzureBlobTelemetryService`, content-free diagnostics/errors
   and public finite-number/closed-label policy; reject whole unsafe events before enqueue.
@@ -13,9 +15,9 @@
   without provisioning a store or transmitting.
 - Retain the 32 MiB response-memory guard and observed-progress pacing.
   No dependency, legacy adapter, format, tag or published-version change.
-  These candidate additions are not in released 0.1.0.
+  These additions are released in 0.2.0 (were not in released 0.1.0).
 
-## Unreleased — queue disk capacity
+### Queue disk capacity
 
 - Add a host-configurable `maxDiskBytes` initializer input to `LokiTelemetryService`,
   defaulting to 50 MiB; no dependency on `LokiLogSink` defaults.
@@ -28,7 +30,7 @@
   ledger must finish pending cleanup before rollback to an older reader.
   No release, live integration or full verification is implied by this entry.
 
-## Unreleased — durable event enqueue
+### Durable event enqueue
 
 - Attempt atomic persistence before enabled `track` returns; retain failed writes
   in memory and expose cumulative per-instance `persistenceFailureCount`.
@@ -43,6 +45,11 @@
 - Keep existing public signatures and legacy JSON batch compatibility. Storage
   I/O now blocks `track`; no disk limit, overflow policy, release or lossless
   delivery guarantee is introduced.
+
+Distributed from Git tag `v0.2.0` through SwiftPM:
+`.package(url: "https://github.com/LeePepe/shared-telemetry.git", exact: "0.2.0")`.
+Licensed under MIT (repository root `LICENSE`). Open target gaps
+remain in [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## 0.1.0 — first release (Git tag v0.1.0)
 
