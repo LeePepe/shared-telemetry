@@ -12,34 +12,34 @@ them through `@testable` or copy them.
 and append `.failed` on failure without extracting error descriptions.
 `LokiLogSink` filters messages/finite numeric context and bounds its queue;
 that is **not universal SDK redaction**. `LokiTelemetryService` forwards caller
-properties. Unreleased source accepts an optional positive `maxDiskBytes`
-(default 50 MiB) on `LokiTelemetryService`, limiting persisted source JSON plus
-Blob sidecars independently of the log sink. Whole oldest batches are evicted;
-single oversized events are rejected, with store-cumulative `droppedEventCount`
-and restart-safe loss tombstones. These additions are not in tag `v0.1.0`.
-Synchronous `track` attempts persistence; failed or in-flight quota-deferred
-writes retain memory fallback. Storage failures increment read-only
-`persistenceFailureCount`. Console/performance
-logging may still expose caller content or error descriptions. Filter product
-data before calling any API; no recordings, transcripts, prompts, personal
+properties. An optional positive `maxDiskBytes` (default 50 MiB) on
+`LokiTelemetryService` limits persisted source JSON plus Blob sidecars
+independently of the log sink. Whole oldest batches are evicted; single
+oversized events are rejected, with store-cumulative `droppedEventCount` and
+restart-safe loss tombstones. These additions are released in tag `v0.2.0` (and
+were not in tag `v0.1.0`). Synchronous `track` attempts persistence; failed or
+in-flight quota-deferred writes retain memory fallback. Storage failures
+increment read-only `persistenceFailureCount`. Console/performance logging may
+still expose caller content or error descriptions. Filter product data before
+calling any API; no recordings, transcripts, prompts, personal
 health/financial content or credentials belong in telemetry.
 
 The Loki outer push shape is shared, but Swift event lines are plain/sorted
 key=value text while the log sink uses JSON. No unified inner event schema is
-implemented. Flush is not an end-to-end receipt; unreleased synchronous enqueue
-blocks on storage and does not guarantee survival when persistence fails.
+implemented. Flush is not an end-to-end receipt; synchronous enqueue blocks on
+storage and does not guarantee survival when persistence fails.
 Internal batch rotation bounds rewrite growth; the separate quota bounds persisted
 data, not memory fallback, ledger metadata or atomic-write transients. Directory-read
 failure does not prevent attempts to send retained memory events. See the source-backed contract for
 retry/persistence/loss limits and receiver-specific authentication cautions.
 
-## Candidate-only Blob Interface
+## Public Azure Blob Adapter
 
-This checkout adds unreleased `AzureBlobTelemetryService`, diagnostics/error and
-`AzureBlobPrivacyPolicy`/nested `ValueRule` (exact public inventory: 15 types).
-Released 0.1.0 does not contain them. See the
-[Blob contract](../sdks/swift/README.md#unreleased-public-azure-blob-adapter) and
-[host configuration](INTEGRATION.md#candidate-blob-integration).
+This checkout provides `AzureBlobTelemetryService`, diagnostics/error and
+`AzureBlobPrivacyPolicy`/nested `ValueRule` (exact public inventory: 15 types),
+released in `v0.2.0` (tag `v0.1.0` did not contain them). See the
+[Blob contract](../sdks/swift/README.md#public-azure-blob-adapter) and
+[host configuration](INTEGRATION.md#blob-integration).
 
 Register event names, keys and closed label values in trusted policy constants;
 `.finiteNumber` accepts only finite JSON-number strings. Missing optional fields

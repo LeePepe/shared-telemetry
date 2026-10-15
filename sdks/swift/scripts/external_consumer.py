@@ -39,7 +39,7 @@ def main():
             raise RuntimeError("resolved SDK does not match requested candidate")
         checkout = consumer / ".build/checkouts/shared-telemetry"
         registry = json.loads((checkout / "ai/registry.json").read_text())
-        if registry["version"] != "0.1.0" or registry["product"] != "LokiKit":
+        if registry["version"] != "0.2.0" or registry["product"] != "LokiKit":
             raise RuntimeError("resolved SDK documentation mismatch")
         if args.version and registry["releaseStatus"] != "released":
             raise RuntimeError("release tag ships an unreleased contract")

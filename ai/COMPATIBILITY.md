@@ -15,7 +15,7 @@ different resolved version when reporting tested evidence.
 
 Existing provider tests include one explicit opt-in live-Loki test that stays
 skipped in ordinary runs. Mock URLProtocol tests do not count as that live test.
-Unreleased source closes the asynchronous enqueue/flush window with synchronous
+The 0.2.0 release closes the asynchronous enqueue/flush window with synchronous
 atomic persistence and a storage-failure counter; the existing public methods,
 initializer and legacy JSON batch format remain compatible. Synchronous file
 I/O latency and write amplification are caller-visible costs; internal batch
@@ -26,13 +26,13 @@ event names, real receiver authentication/storage readback, four-metric coverage
 dependency/security scans and full D1 remain open or unmeasured. There is no
 whole-SDK redaction claim and no complete 6DQ pass.
 
-0.1.0 is the first release, so no earlier deprecation period exists. Future
+0.1.0 was the first release; 0.2.0 is the second release. Future
 breaking changes need explicit from/to guidance and reviewed consumer pin
 upgrades.
 
-## Unreleased Blob addition
+## Azure Blob addition
 
-The new explicit Adapter adds five public inventory entries (including the policy's
+The explicit Adapter adds five public inventory entries (including the policy's
 nested ValueRule), for exactly15; no existing public type/default or dependency
 range changes. Its private version1 catalog wraps unchanged event-array JSON and
 immutable Blob sidecars in identity/build epoch directories. It rejects legacy
