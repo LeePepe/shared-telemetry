@@ -4,7 +4,7 @@
   "library": "shared-telemetry",
   "releaseUnit": "lokikit-python",
   "package": "lokikit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "releaseStatus": "released",
   "wireSchema": "loki-push-v1; inner line not versioned",
   "documents": {

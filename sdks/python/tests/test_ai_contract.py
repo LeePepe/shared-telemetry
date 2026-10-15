@@ -20,18 +20,18 @@ def package(tmp_path):
 
 
 def test_valid_contract(package):
-    CHECK.check_contract(package, "0.1.0")
+    CHECK.check_contract(package, "0.2.0")
 
 
 def test_package_version_mismatch(package):
     with pytest.raises(ValueError, match="PY_AI_VERSION"):
-        CHECK.check_contract(package, "0.2.0")
+        CHECK.check_contract(package, "9.9.9")
 
 
 def test_missing_installed_document(package):
     (package / "ai/INTEGRATION.md").unlink()
     with pytest.raises(ValueError, match="PY_AI_DOCUMENT"):
-        CHECK.check_contract(package, "0.1.0")
+        CHECK.check_contract(package, "0.2.0")
 
 
 def test_invalid_registry_schema(package):
@@ -40,7 +40,7 @@ def test_invalid_registry_schema(package):
     data["schemaVersion"] = 999
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="PY_AI_SCHEMA"):
-        CHECK.check_contract(package, "0.1.0")
+        CHECK.check_contract(package, "0.2.0")
 
 
 def test_duplicate_capability_not_complete(package):
@@ -49,13 +49,13 @@ def test_duplicate_capability_not_complete(package):
     data["capabilities"][1] = data["capabilities"][0]
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="PY_AI_API"):
-        CHECK.check_contract(package, "0.1.0")
+        CHECK.check_contract(package, "0.2.0")
 
 
 def test_document_cannot_escape_installed_package(package):
     (package / "ai/README.md").write_text("[bad](../../outside.md)")
     with pytest.raises(ValueError, match="PY_AI_PATH"):
-        CHECK.check_contract(package, "0.1.0")
+        CHECK.check_contract(package, "0.2.0")
 
 
 def test_missing_distribution_resource_fails():

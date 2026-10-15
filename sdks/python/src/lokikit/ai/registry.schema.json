@@ -6,7 +6,7 @@
   "properties": {
     "$schema": {"const": "registry.schema.json"}, "schemaVersion": {"const": 1},
     "library": {"const": "shared-telemetry"}, "releaseUnit": {"const": "lokikit-python"},
-    "package": {"const": "lokikit"}, "version": {"const": "0.1.0"},
+    "package": {"const": "lokikit"}, "version": {"const": "0.2.0"},
     "releaseStatus": {"enum": ["unreleased", "released"]},
     "wireSchema": {"const": "loki-push-v1; inner line not versioned"},
     "documents": {

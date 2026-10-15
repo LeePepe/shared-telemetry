@@ -116,7 +116,7 @@ exec(compile(ai.joinpath("examples/synthetic.py").read_text(), "installed-synthe
 print("PYTHON_DISTRIBUTION_OK", metadata.version("lokikit"), metadata.version("aiohttp"))
 '''
         run(str(python), "-I", "-c", code, cwd=root)
-        check_contract(SDK / "src/lokikit", "0.1.0")
+        check_contract(SDK / "src/lokikit", "0.2.0")
         for artifact in (wheels[0], sdists[0]):
             print(f"PYTHON_ARTIFACT {artifact.name} sha256={hashlib.sha256(artifact.read_bytes()).hexdigest()}")
 

@@ -1,8 +1,8 @@
 # Migration and rollback
 
-The 0.1.0 first release does not change the Python runtime API.
-The practical initial path is an old source/editable `lokikit` 0.1.0 checkout
-to a wheel built from the `v0.1.0` tag (or an approved fixed revision). No product
+The 0.2.0 release does not change the Python runtime API.
+The practical migration path is from `lokikit` 0.1.0 (or editable checkout)
+to a wheel built from the `v0.2.0` tag (or an approved fixed revision). No product
 migration has been performed by this provider change.
 
 1. Record the old source SHA, installed metadata, aiohttp version, endpoint
