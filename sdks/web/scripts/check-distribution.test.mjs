@@ -36,7 +36,7 @@ test('missing document fails', () => fixture(async root => {
 test('mismatched installed version fails', () => fixture(async root => {
   const filename = path.join(root, 'package.json');
   const data = JSON.parse(await readFile(filename));
-  data.version = '0.2.0';
+  data.version = '9.9.9';
   await writeFile(filename, JSON.stringify(data));
   await assert.rejects(checkContract(root), /WEB_AI_VERSION/);
 }));
