@@ -2,7 +2,7 @@
 
 Use this page to choose a language and match its contract to a consumer dependency. Historical source baseline: `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`. The `v0.1.0` release also incorporates the Python loss-accounting and async-timeout delta from `852d7643bbb2c4fbed38018196a1a5c2c225e223`, distinguished below. Source behavior, accepted upgrade targets and verification evidence remain separate statuses; examples and combined runtime combinations remain unexecuted.
 
-Consume the annotated git tag `v0.1.0` at commit `5f4b4d97d7ad05adb849e0d8937c8745d9b6d15f`: Swift SPM uses `exact: "0.1.0"`; build Python/Web packages from the `v0.1.0` tagged tree. There is no PyPI or npm registry publication.
+Consume the annotated git tag `v0.2.0`: Swift SPM uses `exact: "0.2.0"`; build Python/Web packages from the `v0.2.0` tagged tree. There is no PyPI or npm registry publication. The historical `v0.1.0` tag remains at commit `5f4b4d97d7ad05adb849e0d8937c8745d9b6d15f`; the bounded `v0.1.0` evidence below remains scoped to that release.
 
 ## Entry points
 
@@ -19,10 +19,10 @@ SDKs accept a configured receiver; the checked-in stack and analyzer are not dem
 | SDK | Manifest-declared requirements | Source version/distribution facts | Tested revision/results |
 |---|---|---|---|
 | Swift | Swift tools `6.2`; iOS `26`, macOS `26`; TelemetryDeck SwiftSDK dependency from `2.0.0` | `LokiKit` library; both manifests declare TelemetryDeck, even when choosing the Loki adapter | Not established in this review |
-| Web | Node `>=18`; uses global `fetch` | [package.json](web/package.json) says `0.1.0`, `private: true`, no runtime dependencies; ESM/CJS/types paths are declarations, not validated artifacts | Not established in this review; evergreen-browser support is an existing documentation claim, not a tested matrix |
-| Python | Python `>=3.10`, `aiohttp>=3.9` | [pyproject.toml](python/pyproject.toml) says `0.1.0`; no SDK publication or installed-SDK-wheel validation established here | Source `852d7643…`: 42 synthetic SDK cases passed in the bounded hosted development run below; not combined PR-head or required-CI evidence |
+| Web | Node `>=18`; uses global `fetch` | [package.json](web/package.json) says `0.2.0`, `private: true`, no runtime dependencies; build the package artifact from tag `v0.2.0`; ESM/CJS/types paths are declarations, not validated artifacts | Not established in this review; evergreen-browser support is an existing documentation claim, not a tested matrix |
+| Python | Python `>=3.10`, `aiohttp>=3.9` | [pyproject.toml](python/pyproject.toml) says `0.2.0`; build wheel and sdist artifacts from tag `v0.2.0`; there is no PyPI publication or installed-SDK-wheel validation established here | Source `852d7643…`: 42 synthetic SDK cases passed in the bounded hosted development run below; not combined PR-head or required-CI evidence |
 
-The manifest/distribution facts above were inspected at historical baseline `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`; the Python source delta and its bounded test result are identified separately, not generalized to floating branches or the `v0.1.0` tagged tree. No deprecation schedule or tested cross-version migration is established here. A package version alone is not proof of publication. The accepted target is version-bound documentation plus validated consumer artifacts; this historical review does not establish those checks.
+The current manifest/distribution facts above describe the `v0.2.0` release state. The historical baseline `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`, the Python source delta and its bounded test result are identified separately below and are not generalized to floating branches, the `v0.1.0` tagged tree or `v0.2.0`. No deprecation schedule or tested cross-version migration is established here. A package version alone is not proof of publication. The accepted target is version-bound documentation plus validated consumer artifacts; the historical review below does not establish those checks.
 
 ## Python baseline caveats
 
