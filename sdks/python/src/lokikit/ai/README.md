@@ -1,7 +1,7 @@
 # LokiKit Python consumer contract
 
-Package: `lokikit`, released **0.1.0** (Git tag `v0.1.0`), Python >=3.10.
-Released from repository tag `v0.1.0`; no PyPI publication.
+Package: `lokikit`, released **0.2.0** (Git tag `v0.2.0`), Python >=3.10.
+Released from repository tag `v0.2.0`; no PyPI publication.
 
 | Task | Read |
 | --- | --- |
