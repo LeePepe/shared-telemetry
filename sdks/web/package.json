@@ -1,6 +1,6 @@
 {
   "name": "@leepepe/loki-web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TypeScript Web SDK for Grafana Loki telemetry. Mirrors the Swift LokiKit API.",
   "license": "MIT",
   "author": "LeePepe",

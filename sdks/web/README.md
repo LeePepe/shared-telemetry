@@ -1,10 +1,10 @@
 # @leepepe/loki-web
 
-Read this contract for TypeScript/JavaScript telemetry, queue behavior and browser/Node lifecycle integration. Existing facts are source-reviewed at `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`. Examples are **illustrative/source-reviewed, not executed**; accepted upgrade targets and proposed verification do not describe a released implementation.
+Read this contract for TypeScript/JavaScript telemetry, queue behavior and browser/Node lifecycle integration. Existing facts are source-reviewed at `eff9c1712cd648ed0717e41183ad8bd7bf39cbea`. Examples are **illustrative/source-reviewed, not executed**; proposed consumer verification does not establish product integration.
 
 ## Package status and public exports
 
-[package.json](package.json) declares version `0.1.0`, Node `>=18`, no runtime dependencies and **`private: true`**. Package exports name `dist/index.js` (ESM), `dist/index.cjs` (CJS) and `dist/index.d.ts` (types); artifact existence, package installation and publication were not validated. An npm installation command would not establish availability. The repository rename to `shared-telemetry` leaves this package name unchanged.
+[package.json](package.json) declares version `0.2.0`, Node `>=18`, no runtime dependencies and **`private: true`**. Build the package artifact from Git tag `v0.2.0`; it is not published to npm. Package exports name `dist/index.js` (ESM), `dist/index.cjs` (CJS) and `dist/index.d.ts` (types). An npm installation command would not establish availability. The repository rename to `shared-telemetry` leaves this package name unchanged.
 
 [src/index.ts](src/index.ts) exports:
 

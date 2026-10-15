@@ -1,8 +1,10 @@
 # Migration and rollback
 
-Initial path: source/local-path `@leepepe/loki-web` 0.1.0 → an immutable packed
-artifact from the `v0.1.0` tag (or an approved immutable revision). This provider
-slice changes packaging/docs only, not runtime behavior or consumer dependencies.
+The 0.2.0 release does not change the Web runtime API.
+The practical migration path is from source/local-path `@leepepe/loki-web`
+0.1.0 to an immutable packed artifact built from the `v0.2.0` tag (or an
+approved immutable revision). No product migration has been performed by this
+provider change.
 
 1. Record the old source SHA, lockfile, labels, approved event fields, lifecycle
    wiring and storage mode. Do not capture secret values or real queued content.
