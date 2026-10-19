@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -312,8 +313,16 @@ class GitRepository:
     def _run_with_auth(self, args: Sequence[str], token: str | None) -> str:
         if not token:
             return self._run(args)
+        credentials = base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode(
+            "ascii"
+        )
         result = subprocess.run(
-            ["git", "-c", f"http.extraHeader=Authorization: Bearer {token}", *args],
+            [
+                "git",
+                "-c",
+                f"http.extraHeader=Authorization: Basic {credentials}",
+                *args,
+            ],
             cwd=self.cwd,
             text=True,
             stdout=subprocess.PIPE,

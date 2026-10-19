@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import io
 import os
@@ -16,6 +17,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from scripts.release import publish as publish_adapter
 from scripts.release.shared import (
     CODEX_CHECK,
+    GitRepository,
     QUALITY_CHECK,
     ReleaseError,
     assess_release,
@@ -305,6 +307,31 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("default-branch tip", error)
         self.assertEqual(self.git.created_tags, [])
+
+
+class GitAuthenticationTests(unittest.TestCase):
+    def test_git_https_uses_basic_x_access_token_header(self):
+        token = "secret-token"
+        expected = base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")
+        completed = mock.Mock(returncode=0, stdout="result\n", stderr="")
+        with mock.patch("scripts.release.shared.subprocess.run", return_value=completed) as run:
+            result = GitRepository(cwd="/checkout")._run_with_auth(
+                ["ls-remote", "origin", "refs/tags/v0.2.1"], token
+            )
+
+        self.assertEqual(result, "result")
+        command = run.call_args.args[0]
+        self.assertEqual(
+            command,
+            [
+                "git",
+                "-c",
+                f"http.extraHeader=Authorization: Basic {expected}",
+                "ls-remote",
+                "origin",
+                "refs/tags/v0.2.1",
+            ],
+        )
 
 
 if __name__ == "__main__":
