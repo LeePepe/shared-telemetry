@@ -54,6 +54,7 @@ context=(python3 "$shared_ci/scripts/context/_context.py")
 
 policy() {
     echo "[verify] policy: contract audit + workflow-lint"
+    python3 scripts/tests/test_release.py
     "${context[@]}" audit
     python3 "$shared_ci/scripts/lint/workflows.py" --root . >/dev/null
 }
