@@ -29,14 +29,25 @@ OTHER_COMMIT = "d" * 40
 OTHER_HEAD = "e" * 40
 
 
-def check(name: str, sha: str, *, status: str = "completed", conclusion: str = "success"):
-    return {
+def check(
+    name: str,
+    sha: str,
+    *,
+    status: str = "completed",
+    conclusion: str = "success",
+    check_id: int | None = None,
+    updated_at: str = "2026-10-19T00:00:00Z",
+):
+    result = {
         "name": name,
         "head_sha": sha,
         "status": status,
         "conclusion": conclusion,
-        "updated_at": "2026-10-19T00:00:00Z",
+        "updated_at": updated_at,
     }
+    if check_id is not None:
+        result["id"] = check_id
+    return result
 
 
 def pull_request(
@@ -184,6 +195,43 @@ class ReleaseAssessmentTests(unittest.TestCase):
                 with self.assertRaises(ReleaseError):
                     self.assess()
                 self.github.checks[CANDIDATE] = [check(QUALITY_CHECK, CANDIDATE)]
+
+    def test_overlapping_attempts_use_attempt_order(self):
+        cases = [
+            (
+                "pending",
+                check(
+                    QUALITY_CHECK,
+                    CANDIDATE,
+                    status="in_progress",
+                    conclusion=None,
+                    check_id=200,
+                    updated_at="2026-10-19T00:01:00Z",
+                ),
+            ),
+            (
+                "failed",
+                check(
+                    QUALITY_CHECK,
+                    CANDIDATE,
+                    conclusion="failure",
+                    check_id=201,
+                    updated_at="2026-10-19T00:01:00Z",
+                ),
+            ),
+        ]
+        for label, newest_attempt in cases:
+            with self.subTest(label=label):
+                older_success = check(
+                    QUALITY_CHECK,
+                    CANDIDATE,
+                    check_id=100,
+                    updated_at="2026-10-19T00:10:00Z",
+                )
+                self.github.checks[CANDIDATE] = [newest_attempt, older_success]
+                with self.assertRaisesRegex(ReleaseError, "not successful"):
+                    self.assess()
+        self.github.checks[CANDIDATE] = [check(QUALITY_CHECK, CANDIDATE)]
 
     def test_no_associated_pr_fails(self):
         self.github.prs[CANDIDATE] = []

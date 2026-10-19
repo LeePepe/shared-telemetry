@@ -49,14 +49,19 @@ def highest_release_tag(tags: Iterable[str]) -> tuple[str, tuple[int, int, int]]
     return max(parsed, key=lambda item: item[1])
 
 
-def _check_sort_key(check: Mapping[str, Any]) -> tuple[str, str]:
-    timestamp = (
-        check.get("updated_at")
-        or check.get("completed_at")
-        or check.get("started_at")
-        or ""
-    )
-    return str(timestamp), str(check.get("id", ""))
+def _check_sort_key(check: Mapping[str, Any]) -> tuple[int, int]:
+    """Order check attempts by creation order, never completion time.
+
+    GitHub check-run IDs increase as a newer attempt is created. When a
+    fixture or compatible provider omits the ID, equal keys preserve the
+    newest-first order returned by the check-runs endpoint.
+    """
+    raw_id = check.get("id")
+    try:
+        check_id = int(raw_id)
+    except (TypeError, ValueError):
+        return (0, 0)
+    return (1, check_id)
 
 
 def latest_check(
