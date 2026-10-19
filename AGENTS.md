@@ -30,8 +30,8 @@ contract change must land in every SDK at once (say so in Intent).
 
 ## Protocol
 
-Follow `LeePepe/shared-ci@6e354f476bc53d68f0f09fc231d5cd938466af9c/ai/agent-protocol.md`
-(https://github.com/LeePepe/shared-ci/blob/6e354f476bc53d68f0f09fc231d5cd938466af9c/ai/agent-protocol.md).
+Follow `LeePepe/shared-ci@0d8fcc0b5efb86711a921483ce0748bc19793add/ai/agent-protocol.md`
+(https://github.com/LeePepe/shared-ci/blob/0d8fcc0b5efb86711a921483ce0748bc19793add/ai/agent-protocol.md).
 It must be the same SHA as the `uses:` pins in `.github/workflows/`.
 
 ## Verify
@@ -86,7 +86,7 @@ Approved exceptions:
 
 ## Dependencies
 
-- `shared-ci` `6e354f476bc53d68f0f09fc231d5cd938466af9c` — https://github.com/LeePepe/shared-ci/blob/6e354f476bc53d68f0f09fc231d5cd938466af9c/ai/
+- `shared-ci` `0d8fcc0b5efb86711a921483ce0748bc19793add` — https://github.com/LeePepe/shared-ci/blob/0d8fcc0b5efb86711a921483ce0748bc19793add/ai/
 - No other shared library. External: TelemetryDeck SwiftSDK (SwiftSDK), aiohttp
   (PythonSDK), requests + PyYAML (ProjectAnalyzer).
 
