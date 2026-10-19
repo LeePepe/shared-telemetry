@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   quality:
-    uses: LeePepe/shared-ci/.github/workflows/quality.yml@6e354f476bc53d68f0f09fc231d5cd938466af9c
+    uses: LeePepe/shared-ci/.github/workflows/quality.yml@0d8fcc0b5efb86711a921483ce0748bc19793add
     with:
       runs-on: ubuntu-latest
       setup-command: scripts/ci/setup.sh

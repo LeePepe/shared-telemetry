@@ -24,7 +24,7 @@ concurrency:
 jobs:
   codex-review-target:
     if: vars.SHARED_CI_REVIEW_RUNNER == 'true'
-    uses: LeePepe/shared-ci/.github/workflows/codex-review.yml@6e354f476bc53d68f0f09fc231d5cd938466af9c
+    uses: LeePepe/shared-ci/.github/workflows/codex-review.yml@0d8fcc0b5efb86711a921483ce0748bc19793add
     with:
       codex-bin: /opt/homebrew/bin/codex
       rules-file: AGENTS.md
