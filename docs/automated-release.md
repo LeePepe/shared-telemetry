@@ -39,11 +39,10 @@ before creating the annotated tag. It
 refuses an existing tag or a race, never moves or deletes a tag, and reads the
 remote tag back to confirm it points at the candidate.
 
-## Owner step
+## Owner decisions
 
-`.github/**` and `scripts/verify` are protected by CODEOWNERS, so the PR needs
-the Owner's review and the `owner-review` label until that protection is
-enforced by the ruleset. Owner approval of the release workflow is also the
-enablement decision for automatic tagging. A `breaking` label always pauses
+Required checks and AI review protect changes to `.github/**` and
+`scripts/verify`; merging does not require an approving review. The Owner
+still decides whether to enable automatic tagging. A `breaking` label always pauses
 publication for the Owner's decision; no release tag is created automatically
 for that candidate.
