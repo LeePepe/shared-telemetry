@@ -10,7 +10,7 @@ name: review
 # after positive/negative probe acceptance, with approved settings and live readback.
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
     branches: [main]
 
 permissions:
