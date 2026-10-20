@@ -30,8 +30,8 @@ contract change must land in every SDK at once (say so in Intent).
 
 ## Protocol
 
-Follow `LeePepe/shared-ci@88c09b3f68ceea82a4ca979c689e3dc50266ee10/ai/agent-protocol.md`
-(https://github.com/LeePepe/shared-ci/blob/88c09b3f68ceea82a4ca979c689e3dc50266ee10/ai/agent-protocol.md).
+Follow `LeePepe/shared-ci@46c88fbae98b03dc6cf2e23c2e5a19c48ff68fe4/ai/agent-protocol.md`
+(https://github.com/LeePepe/shared-ci/blob/46c88fbae98b03dc6cf2e23c2e5a19c48ff68fe4/ai/agent-protocol.md).
 It must be the same SHA as the `uses:` pins in `.github/workflows/`.
 
 ## Verify
@@ -86,7 +86,7 @@ Approved exceptions:
 
 ## Dependencies
 
-- `shared-ci` `88c09b3f68ceea82a4ca979c689e3dc50266ee10` — https://github.com/LeePepe/shared-ci/blob/88c09b3f68ceea82a4ca979c689e3dc50266ee10/ai/
+- `shared-ci` `46c88fbae98b03dc6cf2e23c2e5a19c48ff68fe4` — https://github.com/LeePepe/shared-ci/blob/46c88fbae98b03dc6cf2e23c2e5a19c48ff68fe4/ai/
 - No other shared library. External: TelemetryDeck SwiftSDK (SwiftSDK), aiohttp
   (PythonSDK), requests + PyYAML (ProjectAnalyzer).
 
@@ -94,7 +94,7 @@ Approved exceptions:
 
 - One task → one branch + worktree → one PR using `.github/pull_request_template.md`.
 - Done = required checks green on the PR head SHA; a new push invalidates old evidence.
-- CODEOWNERS paths (`.github/**`, hooks, `scripts/verify`, `scripts/ci/`,
-  tech-context, AGENTS/CLAUDE, manifests and lockfiles) need Owner approval;
-  until enforced, add the `owner-review` label.
+- Required checks, AI review and server rules protect policy, gates, CI,
+  rulesets, schemas and repository guidance. Enable auto-merge when opening
+  a non-Draft PR; no approving review or approval label is required.
 - Report the commit, `scripts/verify` result and PR URL.
